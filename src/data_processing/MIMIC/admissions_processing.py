@@ -1,25 +1,32 @@
-# Processing script for initial ED admission processing.
+"""
+Processing script for initial ED admission processing.
 
+Author: Henrique Aguiar
+Last Updated: 16 February 2023
+
+This files processes MIMIC-IV-ED admissions. It is the first file to run for MIMIC processing.
+
+Steps:
+- Computed intime/outtime for each ED admission.
+- Select admissions with ED as first admission.
+- Remove admissions admitted to special wards, such as Partum and Psychiatry. Also compute the following transfer location.
+- Add core patient information (i.e. demographic).
+- Remove patients that are too ill or not ill enough (ESI = 1,5)
+
+Save processed data.
+
+
+INTERNAL COMMENTS WHILE CODING:
+ROW SUBSELECTION COULD BE IMPROVED
+
+"""
+
+# Import Libraries
 import os
 import pandas as pd
 
 import src.data_processing.MIMIC.data_utils as utils
 
-####################################################
-"""
-
-Processing Steps:
-
-1. Compute recorded intime and outimes for each ED admission.
-2. Select admissions with ED as the first admission.
-3. Remove admissions admitted to special wards, including Partum and Psychiatry. Compute next transfer information.
-4. Add patient core information.
-5. Remove admissions without triage information.
-
-
-Other notes.
-ROW SUBSETTING COULD BE IMPROVED SOMEHOW
-"""
 
 # ------------------------------------ // --------------------------------------
 """
@@ -51,8 +58,10 @@ if not os.path.exists(SAVE_FD):
     os.makedirs(SAVE_FD)
 
 
+
 # ------------------------------------- // -------------------------------------
 def main():
+
     """
     First, Tables are Loaded. We load 4 tables:
     
