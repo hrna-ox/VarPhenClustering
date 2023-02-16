@@ -1,0 +1,33 @@
+{
+   "model_name": "camelot",
+   "num_clusters": 10,
+   "latent_dim": 64,
+   "seed": 2323,
+   "name": "CAMELOT",
+   "alpha_1": 0.01,
+   "alpha_2": 0.01,
+   "alpha_3": 1,
+   "beta": 1,
+   "regulariser_params": [
+      0.01,
+      0.01
+   ],
+   "dropout": 0.0,
+   "encoder_params": {
+      "hidden_layers": 1,
+      "hidden_nodes": 20
+   },
+   "identifier_params": {
+      "hidden_layers": 1,
+      "hidden_nodes": 30
+   },
+   "predictor_params": {
+      "hidden_layers": 1,
+      "hidden_nodes": 30
+   },
+   "C": 0.1,
+   "probability": true,
+   "n_estimators": 200,
+   "objective": "softmax",
+   "n_clusters": 8
+}
