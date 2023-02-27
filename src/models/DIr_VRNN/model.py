@@ -184,10 +184,10 @@ def estimate_new_clus(pis, zs):
 
 # ============= MAIN MODEL DEFINITION =============
 
-class VRNN(nn.Module):
+class DirVRNN(nn.Module):
     def _init_(self, input_size, outcome_size, latent_size, gate_layers, gate_nodes, 
                feat_extr_layers, feat_extr_nodes, num_clus):
-        super(VRNN, self)._init_()
+        super()._init_()
 
         # Define the dimensions of the input, hidden, and latent variables
         self.input_size = input_size
@@ -350,3 +350,58 @@ class VRNN(nn.Module):
             h = self.cell_state_update(state_update_input)
 
         return loss
+
+
+# =============== MODEL WRAPPER WITH TRAIN/TEST METHODS ==================
+
+class Model:
+    """
+    Wrapper class to implement Dirichlet VRNN model.
+    """
+    def __init__(self, data_info, model_config):
+        "Initialise model configuration parameters."
+        self.data_info = data_info
+        self.model_config = model_config
+
+        # Empty attribute which will be updated later.
+        self.model = None
+
+    def fit(self, train_params):
+        """
+        Fit method for training CAMELOT model.
+
+        Params:
+        - train_params: dictionary containing trianing parameter information:
+            - "lr": learning rate for training
+            - "epochs_init": number of epochs to train initialisation
+            - "epochs": number of epochs for main training
+            - "bs": batch size
+            - "cbck_str": callback_string indicating which callbacks to print during training
+        """
+
+        # Unpack relevant data information
+        X_train, X_val, X_test = self.data_info["X"]
+        y_train, y_val, y_test = self.data_info["y"]
+        output_dim = self.data_info["output_dim"]
+
+        # Unpack training parameters
+        lr = train_params["lr"]
+        epochs = train_params["epochs"]
+        bs = train_params["bs"]
+
+        # Empty - needs further
+        # callback_str = train_params["cbck_str"]
+
+        # TODO- ADD GPU USAGE
+
+        # Initialise model
+        self.model = DirVRNN(
+                input
+                **self.model_config)
+
+input_size, outcome_size, latent_size, gate_layers, gate_nodes,
+               feat_extr_layers, feat_extr_nodes, num_clus
+
+
+
+
