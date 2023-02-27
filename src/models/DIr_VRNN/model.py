@@ -385,13 +385,6 @@ class Model:
 
         # Initialise model
         self.model = DirVRNN(input_size=X_train.shape[-1],
-                             outcome_size=output_dim,
-                             latent_size=10,
-                             gate_layers=2,
-                             gate_nodes=30,
-                             feat_extr_layers=2,
-                             feat_extr_nodes=30,
-                             num_clus=30,
                              **self.model_config)
 
         # Useful for model training
