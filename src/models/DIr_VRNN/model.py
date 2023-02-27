@@ -9,14 +9,14 @@ Main model is represented as a class, and then a wrapper class is added at the e
 # ============= IMPORT LIBRARIES ==============
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.utils.data import DataLoader, TensorDataset
 
 import numpy as np
 
 from src.models.model_utils import MLP
 
-# ============= CONFIGURATION OR FILE SPECIFIC =============
 
+# ============= CONFIGURATION OR FILE SPECIFIC =============
 
 
 # ============= UTILITY FUNCTIONS =============
@@ -61,11 +61,11 @@ def _sample_differentiable_gamma_dist(alphas):
     # Approximate with inverse transform sampling
     gamma_samples = torch.pow(
         (
-            alphas * 
-            uniform_samples * 
-            torch.exp(torch.lgamma(alphas))
-            ),
-        1/alphas
+                alphas *
+                uniform_samples *
+                torch.exp(torch.lgamma(alphas))
+        ),
+        1 / alphas
     )
 
     # Output generated samples
@@ -105,7 +105,7 @@ def compute_gaussian_log_lik(x, mu, var):
     return torch.mean(log_lik)
 
 
-def compute_dirichlet_KL_div(alpha_1, alpha_2):
+def compute_dirichlet_kl_div(alpha_1, alpha_2):
     """
     Computes KL divergence between Dirichlet distribution with parameter alpha 1 and dirichlet distribution of
     parameter alpha 2.
@@ -131,11 +131,11 @@ def compute_dirichlet_KL_div(alpha_1, alpha_2):
     first_term = log_gamma_1_sum - log_gamma_2_sum
     second_term = torch.sum(log_gamma_1 - log_gamma_2, dim=-1, keepdim=False)
     third_term = torch.sum(torch.mul(
-                        alpha_1 - alpha_2,
-                        digamma_1 - digamma_1_sum
-                    ),
-                    dim=-1,
-                    keepdim=False
+        alpha_1 - alpha_2,
+        digamma_1 - digamma_1_sum
+    ),
+        dim=-1,
+        keepdim=False
     )
 
     # Combine all terms
@@ -165,6 +165,7 @@ def compute_outcome_loss(y_true, y_pred):
 
     return torch.mean(log_loss)
 
+
 def estimate_new_clus(pis, zs):
     """
     Estimate new cluster representations given probability assignments and estimated samples.
@@ -178,16 +179,19 @@ def estimate_new_clus(pis, zs):
     """
 
     # This is equivalent to matrix multiplication
-    new_clus = torch.matmul(torch.transpose(pis), zs)
+    new_clus = torch.matmul(torch.transpose(pis, dim0=1, dim1=0), zs)
 
     return new_clus
 
+
 # ============= MAIN MODEL DEFINITION =============
 
+
 class DirVRNN(nn.Module):
-    def _init_(self, input_size, outcome_size, latent_size, gate_layers, gate_nodes, 
-               feat_extr_layers, feat_extr_nodes, num_clus):
-        super()._init_()
+
+    def __init__(self, input_size, outcome_size, latent_size, gate_layers, gate_nodes,
+                 feat_extr_layers, feat_extr_nodes, num_clus, **kwargs):
+        super().__init__()
 
         # Define the dimensions of the input, hidden, and latent variables
         self.input_size = input_size
@@ -200,64 +204,59 @@ class DirVRNN(nn.Module):
         self.K = num_clus
 
         # Define the encoder network - Computes alpha of Dirichlet distribution given h and z
-        self.encoder = MLP(input_size = self.latent_dim + self.latent_dim, 
-                           output_size = self.K,
-                            act_fn = "relu", 
-                            hidden_layers = self.gate_layers,
-                            hidden_nodes=self.gate_nodes,
-                            output_fn = "relu")
-        
+        self.encoder = MLP(input_size=self.latent_dim + self.latent_dim,
+                           output_size=self.K,
+                           act_fn="relu",
+                           hidden_layers=self.gate_layers,
+                           hidden_nodes=self.gate_nodes,
+                           output_fn="relu")
 
         # Define the decoder network - computes mean, var of Observation data
-        self.decoder = MLP(input_size = self.latent_dim + self.latent_dim,     # input is z and h
-                           output_size = self.input_size + self.input_size,    # output is mean/var of observation
-                           hidden_layers = gate_layers,
-                           hidden_nodes = gate_nodes,
-                           act_fn = "relu",
-                           output_fn = "tanh")
-
+        self.decoder = MLP(input_size=self.latent_dim + self.latent_dim,  # input is z and h
+                           output_size=self.input_size + self.input_size,  # output is mean/var of observation
+                           hidden_layers=gate_layers,
+                           hidden_nodes=gate_nodes,
+                           act_fn="relu",
+                           output_fn="tanh")
 
         # Define the prior network
-        self.prior = MLP(input_size = self.latent_dim,
-                         output_size = self.K,
-                         act_fn = "relu",
-                         hidden_layers = self.gate_layers,
-                         hidden_nodes = self.gate_nodes,
-                         output_fn = "relu")
-        
+        self.prior = MLP(input_size=self.latent_dim,
+                         output_size=self.K,
+                         act_fn="relu",
+                         hidden_layers=self.gate_layers,
+                         hidden_nodes=self.gate_nodes,
+                         output_fn="relu")
 
         # Define the output network
-        self.predictor = MLP(input_size = self.latent_dim,
-                             output_size = self.outcome_size,
-                             hidden_layers = gate_layers,
-                             hidden_nodes = gate_nodes,
-                             act_fn = "relu",
-                             output_fn = "tanh")
-        
-        
+        self.predictor = MLP(input_size=self.latent_dim,
+                             output_size=self.outcome_size,
+                             hidden_layers=gate_layers,
+                             hidden_nodes=gate_nodes,
+                             act_fn="relu",
+                             output_fn="tanh")
+
         # Define feature extractors
-        self.phi_x = MLP(input_size = self.input_size,
-                         output_size = self.latent_dim,
-                         hidden_layers = feat_extr_layers,
-                         hidden_nodes = self.feat_extr_nodes,
-                         act_fn = "relu",
-                         output_fn = "tanh")
+        self.phi_x = MLP(input_size=self.input_size,
+                         output_size=self.latent_dim,
+                         hidden_layers=feat_extr_layers,
+                         hidden_nodes=self.feat_extr_nodes,
+                         act_fn="relu",
+                         output_fn="tanh")
 
-        self.phi_z = MLP(input_size = self.latent_dim,
-                         hidden_layers= feat_extr_layers,
-                         hidden_nodes= feat_extr_nodes,
-                         act_fn = "relu",
-                         output_fn = "tanh")
-
+        self.phi_z = MLP(input_size=self.latent_dim,
+                         output_size=self.latent_dim,
+                         hidden_layers=feat_extr_layers,
+                         hidden_nodes=feat_extr_nodes,
+                         act_fn="relu",
+                         output_fn="tanh")
 
         # Recurrency
-        self.cell_state_update = MLP(input_size = self.latent_dim + self.latent_dim + self.latent_dim,
-                       output_size = self.latent_dim,
-                       hidden_layers = self.gate_layers,
-                       hidden_nodes = self.gate_nodes,
-                       act_fn = "relu",
-                       output_fn = "tanh")
-        
+        self.cell_state_update = MLP(input_size=self.latent_dim + self.latent_dim + self.latent_dim,
+                                     output_size=self.latent_dim,
+                                     hidden_layers=self.gate_layers,
+                                     hidden_nodes=self.gate_nodes,
+                                     act_fn="relu",
+                                     output_fn="tanh")
 
     # What to do given input
     def forward(self, x, y):
@@ -274,19 +273,18 @@ class DirVRNN(nn.Module):
         cluster_means = torch.rand(size=[self.K, self.latent_dim]).to(x.device)
         loss = 0
 
-
         # Iterate over the sequence
         for t in range(seq_len):
 
             # Observation data
             x_t = x[:, t, :]
-            
+
             # Compute encoder alpha by extracting features from input and concatenating with hidden state
             joint_enc_input = torch.cat([
-                        self.phi_x(x_t),        # Extract feature from x
-                        h],                            
-                        dim = -1                       # Concatenate with cell state in last dimension
-                        )
+                self.phi_x(x_t),  # Extract feature from x
+                h],
+                dim=-1  # Concatenate with cell state in last dimension
+            )
             alpha_enc = self.encoder(joint_enc_input)
 
             # Sample mechanism
@@ -294,7 +292,6 @@ class DirVRNN(nn.Module):
 
             # Average over clusters to estimate latent variable
             z_samples = torch.matmul(pi_samples, cluster_means)
-            
 
             # Compute posterior parameters by extracting features from latent and concatenating with hidden state
             joint_dec_input = torch.cat([
@@ -312,10 +309,8 @@ class DirVRNN(nn.Module):
             # Compute prior parameters
             alpha_prior = self.prior(h)
 
-
             # Update Cluster means
             cluster_means = estimate_new_clus(pi_samples, z_samples)
-
 
             # -------- COMPUTE LOSS FOR TIME t -----------
 
@@ -323,22 +318,20 @@ class DirVRNN(nn.Module):
             log_lik = compute_gaussian_log_lik(x_t, mu_g, var_g)
 
             # KL divergence
-            kl_div = compute_dirichlet_KL_div(alpha_enc, alpha_prior)
+            kl_div = compute_dirichlet_kl_div(alpha_enc, alpha_prior)
 
             loss += log_lik - kl_div
 
             # Last Time Step
             if t == seq_len - 1:
-
                 # Predict outcome
-                y_pred = self.predictor(z)
+                y_pred = self.predictor(z_samples)
 
                 # Compute loss
                 pred_loss = compute_outcome_loss(y_true=y, y_pred=y_pred)
 
                 # Add to total loss
                 loss += pred_loss
-
 
             # ----- UPDATE CELL STATE
             state_update_input = torch.cat([
@@ -358,21 +351,23 @@ class Model:
     """
     Wrapper class to implement Dirichlet VRNN model.
     """
+
     def __init__(self, data_info, model_config):
-        "Initialise model configuration parameters."
+        """Initialise model configuration parameters."""
         self.data_info = data_info
         self.model_config = model_config
 
         # Empty attribute which will be updated later.
         self.model = None
         self.optimizer = None
+        self.train_params = None
 
-    def fit(self, train_params):
+    def train(self, train_params):
         """
-        Fit method for training CAMELOT model.
+        Train method for training CAMELOT model.
 
         Params:
-        - train_params: dictionary containing trianing parameter information:
+        - train_params: dictionary containing training parameter information:
             - "lr": learning rate for training
             - "epochs_init": number of epochs to train initialisation
             - "epochs": number of epochs for main training
@@ -382,7 +377,6 @@ class Model:
 
         # Unpack relevant data information
         X_train, X_val, X_test = self.data_info["X"]
-        y_train, y_val, y_test = self.data_info["y"]
         output_dim = self.data_info["output_dim"]
 
         # Unpack training parameters
@@ -390,55 +384,76 @@ class Model:
         num_epochs, lr = train_params["epochs"], train_params["lr"]
 
         # Initialise model
-        self.model = DirVRNN(
-                input_size=X_train.shape[-1],
-                outcome_size = output_dim,
-                latent_size=10,
-                gate_layers=2,
-                gate_nodes=30,
-                feat_extr_layers=2,
-                feat_extr_nodes=30,
-                num_clus=30,
-                **self.model_config)
-        
+        self.model = DirVRNN(input_size=X_train.shape[-1],
+                             outcome_size=output_dim,
+                             latent_size=10,
+                             gate_layers=2,
+                             gate_nodes=30,
+                             feat_extr_layers=2,
+                             feat_extr_nodes=30,
+                             num_clus=30,
+                             **self.model_config)
+
         # Useful for model training
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
-
 
         # ============ TRAINING LOOP ==============
 
         # Iterate through epochs
-        for epoch in range(1, num_epochs+1):
-            self.train(epoch)
-            self.test(epoch)
-            
+        for epoch in range(1, num_epochs + 1):
+            self.evaluate(epoch)
+            self.validate(epoch)
 
-        pass
-
-    def train(self, epoch):
+    def evaluate(self, epoch):
         """
         Train model over 1 epoch.
         """
         train_loss = 0
+        optimizer = self.optimizer
 
-        for batch_id, (data, _) in enumerate(train_loader):
-            
-            # Transform data
-            data = data.to(device)
+        # Load training parameters
+        batch_size = self.train_params["bs"]
 
+        # Load data
+        X_train, X_val, X_test = self.data_info["X"]
+        y_train, y_val, y_test = self.data_info["y"]
+
+        # Prepare train data loader
+        train_dataset = TensorDataset(X_train, y_train)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+        for batch_id, (X_batch, y_batch) in enumerate(train_loader):
             # Apply optimiser
             optimizer.zero_grad()
-            loss = model(data)
+            loss = self.model(X_batch)
 
             # Back_propagate
             loss.backward()
             optimizer.step()
 
-            print("""
-                Train epoch: {}        [{:.2f}  /   {:.2f}      {:.0f}%]
-            """.format(epoch, batch_id, ))
+            # Add to train loss
+            train_loss += loss.item()
 
+            print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
+                epoch, loss.item(), 100. * batch_id / len(train_loader)),
+                end="\r")
 
+    def validate(self, epoch):
+        """Evaluate model performance on test data."""
 
+        # Load data
+        X_train, X_val, X_test = self.data_info["X"]
+        y_train, y_val, y_test = self.data_info["y"]
 
+        # Prepare train data loader
+        val_dataset = TensorDataset(X_val, y_val)
+        val_loader = DataLoader(val_dataset, batch_size=1, shuffle=True)
 
+        for batch_id, (X_batch, y_batch) in enumerate(val_loader):
+
+            # Compute Loss
+            loss = self.model(X_batch).item()
+
+            print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
+                epoch, loss.item(), 100. * batch_id / len(val_loader)),
+                end="\r")
