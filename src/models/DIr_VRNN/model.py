@@ -11,6 +11,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import numpy as np
+
 from src.models.model_utils import MLP
 
 # ============= CONFIGURATION OR FILE SPECIFIC =============
@@ -18,6 +20,7 @@ from src.models.model_utils import MLP
 
 
 # ============= UTILITY FUNCTIONS =============
+
 
 def sample_dirichlet(alpha):
     """
@@ -69,6 +72,115 @@ def _sample_differentiable_gamma_dist(alphas):
     return gamma_samples
 
 
+def compute_gaussian_log_lik(x, mu, var):
+    """
+    Compute log likelihood function for inputs x given multivariate normal distribution with
+    mean mu and variance var.
+
+    Parameters:
+        - x: of shape (batch_size, input_size)
+        - mu, var: of shape (input_size)
+
+    Output:
+        - log likelihood of gaussian distribution with shape (batch_size)
+    """
+
+    # Compute exponential term
+    exp_term = 0.5 * torch.sum(
+        torch.mul(
+            torch.mul(
+                x - mu,  # (batch_size, input_size)
+                1 / var  # (batch_size, input_size)
+            ),  # (batch_size, input_size)
+            x - mu
+        ),
+        dim=-1,
+        keepdim=False
+    )  # (batch_size)
+
+    # Compute log likelihood
+    _input_size = list(x.size)[-1]
+    log_lik = - 0.5 * _input_size * torch.log(2 * np.pi) - 0.5 * torch.prod(var, dim=-1, keepdim=False) - exp_term
+
+    return torch.mean(log_lik)
+
+
+def compute_dirichlet_KL_div(alpha_1, alpha_2):
+    """
+    Computes KL divergence between Dirichlet distribution with parameter alpha 1 and dirichlet distribution of
+    parameter alpha 2.
+
+    Inputs: alpha_1, alpha_2 array-like of shape (batch_size, K)
+
+    Outputs: array of shape (batch_size) with corresponding KL divergence.
+    """
+
+    # Compute gamma functions for alpha_i
+    log_gamma_1, log_gamma_2 = torch.lgamma(alpha_1), torch.lgamma(alpha_2)
+
+    # Sum of alphas
+    alpha_1_sum, alpha_2_sum = torch.sum(alpha_1, dim=-1, keepdim=True), torch.sum(alpha_2, dim=-1, keepdim=True)
+
+    # Compute gamma of sum of alphas
+    log_gamma_1_sum, log_gamma_2_sum = torch.lgamma(alpha_1_sum), torch.lgamma(alpha_2_sum)
+
+    # Compute digamma for each alpha_1 term and alpha_1 sum
+    digamma_1, digamma_1_sum = torch.digamma(alpha_1), torch.digamma(alpha_1_sum)
+
+    # Compute terms in Lemma 3.3.
+    first_term = log_gamma_1_sum - log_gamma_2_sum
+    second_term = torch.sum(log_gamma_1 - log_gamma_2, dim=-1, keepdim=False)
+    third_term = torch.sum(torch.mul(
+                        alpha_1 - alpha_2,
+                        digamma_1 - digamma_1_sum
+                    ),
+                    dim=-1,
+                    keepdim=False
+    )
+
+    # Combine all terms
+    kl_div = torch.squeeze(first_term) + second_term + third_term
+
+    return torch.mean(kl_div)
+
+
+def compute_outcome_loss(y_true, y_pred):
+    """
+    Compute outcome loss given true outcome y (one-hot encoded) and predicted categorical distribution parameter y_pred.
+
+    Parameters:
+        - y_true: one-hot encoded of shape (batch_size, num_outcomes)
+        - y_pred: of shape (batch_size, num_outcomes)
+
+    Outputs:
+        - categorical distribution loss
+    """
+
+    # Compute log term
+    log_loss = torch.sum(
+        y_true * torch.log(y_pred + 1e-8),
+        dim=-1,
+        keepdim=False
+    )
+
+    return torch.mean(log_loss)
+
+def estimate_new_clus(pis, zs):
+    """
+    Estimate new cluster representations given probability assignments and estimated samples.
+
+    Parameters:
+        - pis: probability of cluster assignment (sampled from Dirichlet) of shape (batch_size, K)
+        - zs: current estimation for observation representation of shape (batch_size, latent_dim)
+
+    Output:
+        - new cluster estimates of shape (K, latent_dim)
+    """
+
+    # This is equivalent to matrix multiplication
+    new_clus = torch.matmul(torch.transpose(pis), zs)
+
+    return new_clus
 
 # ============= MAIN MODEL DEFINITION =============
 
@@ -139,7 +251,7 @@ class VRNN(nn.Module):
 
 
         # Recurrency
-        self.rnn = MLP(input_size = self.latent_dim + self.latent_dim + self.latent_dim,
+        self.cell_state_update = MLP(input_size = self.latent_dim + self.latent_dim + self.latent_dim,
                        output_size = self.latent_dim,
                        hidden_layers = self.gate_layers,
                        hidden_nodes = self.gate_nodes,
@@ -148,14 +260,18 @@ class VRNN(nn.Module):
         
 
     # What to do given input
-    def forward(self, x):
+    def forward(self, x, y):
+        """
+        Computations and loss update of the model
+
+        """
 
         # Extract dimensions
-        batch_size, seq_len, _ = x.size()
+        batch_size, seq_len, input_size = x.size()
 
-        # Initialize the current hidden state and latent variable and loss
+        # Initialize the current hidden state and cluster means
         h = torch.zeros(batch_size, self.hidden_size).to(x.device)
-        z = torch.zeros(batch_size, self.latent_size).to(x.device)
+        cluster_means = torch.rand(size=[self.K, self.latent_dim]).to(x.device)
         loss = 0
 
 
@@ -177,7 +293,7 @@ class VRNN(nn.Module):
             pi_samples = sample_dirichlet(alpha=alpha_enc)
 
             # Average over clusters to estimate latent variable
-            z_samples = torch.matmul(pi_samples, clus_means)
+            z_samples = torch.matmul(pi_samples, cluster_means)
             
 
             # Compute posterior parameters by extracting features from latent and concatenating with hidden state
@@ -193,47 +309,44 @@ class VRNN(nn.Module):
             )
             var_g = torch.exp(logvar_g)
 
+            # Compute prior parameters
+            alpha_prior = self.prior(h)
+
+
+            # Update Cluster means
+            cluster_means = estimate_new_clus(pi_samples, z_samples)
+
 
             # -------- COMPUTE LOSS FOR TIME t -----------
 
             # Data Likelihood component
-            log_lik = torch.log(
-                torch.divide(
-                    x_t - mu_g  ,
-                )
-            )
-            
+            log_lik = compute_gaussian_log_lik(x_t, mu_g, var_g)
 
+            # KL divergence
+            kl_div = compute_dirichlet_KL_div(alpha_enc, alpha_prior)
+
+            loss += log_lik - kl_div
+
+            # Last Time Step
             if t == seq_len - 1:
-                pass
-            
-            else:
-                pass
-                # Update Cell State
+
+                # Predict outcome
+                y_pred = self.predictor(z)
+
+                # Compute loss
+                pred_loss = compute_outcome_loss(y_true=y, y_pred=y_pred)
+
+                # Add to total loss
+                loss += pred_loss
 
 
-            # Compute the prior distribution
-            p_z = self.prior(h)
+            # ----- UPDATE CELL STATE
+            state_update_input = torch.cat([
+                self.phi_z(z_samples),
+                self.phi_x(x_t),
+                h],
+                dim=-1
+            )
+            h = self.cell_state_update(state_update_input)
 
-            # Compute the posterior distribution
-            input_z = torch.cat([x[:, t, :], h], dim=-1)
-            q_z = self.posterior(input_z)
-
-            # Compute the KL divergence loss
-            mu_z, logvar_z = torch.chunk(q_z, 2, dim=-1)
-            kl_loss = -0.5 * torch.sum(1 + logvar_z - mu_z.pow(2) - logvar_z.exp())
-
-            # Decode the latent variable and hidden state
-            input_zh = torch.cat([z, h], dim=-1)
-            x_tilde = self.dgecoder(input_zh)
-
-            # Compute the reconstruction loss
-            recon_loss = F.binary_cross_entropy(x_tilde, x[:, t, :], reduction='sum')
-
-            # Update the hidden state
-            _, h = self.rnn(x[:, t, :].unsqueeze(0), h)
-
-            # Add the losses to the total loss
-            loss += kl_loss + recon_loss
-
-        return loss / batch_size
+        return loss
