@@ -365,6 +365,7 @@ class Model:
 
         # Empty attribute which will be updated later.
         self.model = None
+        self.optimizer = None
 
     def fit(self, train_params):
         """
@@ -385,22 +386,58 @@ class Model:
         output_dim = self.data_info["output_dim"]
 
         # Unpack training parameters
-        lr = train_params["lr"]
-        epochs = train_params["epochs"]
-        bs = train_params["bs"]
-
-        # Empty - needs further
-        # callback_str = train_params["cbck_str"]
-
-        # TODO- ADD GPU USAGE
+        self.train_params = train_params
+        num_epochs, lr = train_params["epochs"], train_params["lr"]
 
         # Initialise model
         self.model = DirVRNN(
-                input
+                input_size=X_train.shape[-1],
+                outcome_size = output_dim,
+                latent_size=10,
+                gate_layers=2,
+                gate_nodes=30,
+                feat_extr_layers=2,
+                feat_extr_nodes=30,
+                num_clus=30,
                 **self.model_config)
+        
+        # Useful for model training
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
 
-input_size, outcome_size, latent_size, gate_layers, gate_nodes,
-               feat_extr_layers, feat_extr_nodes, num_clus
+
+        # ============ TRAINING LOOP ==============
+
+        # Iterate through epochs
+        for epoch in range(1, num_epochs+1):
+            self.train(epoch)
+            self.test(epoch)
+            
+
+        pass
+
+    def train(self, epoch):
+        """
+        Train model over 1 epoch.
+        """
+        train_loss = 0
+
+        for batch_id, (data, _) in enumerate(train_loader):
+            
+            # Transform data
+            data = data.to(device)
+
+            # Apply optimiser
+            optimizer.zero_grad()
+            loss = model(data)
+
+            # Back_propagate
+            loss.backward()
+            optimizer.step()
+
+            print("""
+                Train epoch: {}        [{:.2f}  /   {:.2f}      {:.0f}%]
+            """.format(epoch, batch_id, ))
+
 
 
 
