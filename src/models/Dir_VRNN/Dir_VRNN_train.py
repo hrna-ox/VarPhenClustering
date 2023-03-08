@@ -5,11 +5,14 @@ Contact: henrique.aguiar@eng.ox.ac.uk
 File to train Dirichlet-VRNN Model.
 """
 
-# =============== IMPORT LIBRARIES ===============
+# =============== IMPORT LIBRARIES ===============s
+
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+import torch.utils.tensorboard.writer as writer
 
 from src.models.Dir_VRNN.model import BaseModel
+import src.models.Dir_VRNN.Dir_VRNN_utils as utils
 
 
 # =============== Definition of training step ==================
@@ -18,13 +21,14 @@ class DirVRNN(BaseModel):
     """
     Wrapper class to Base Model that implements full training and testing algorithms.
     """
+
     def __init__(self, data_info, model_config, training_config):
         """
         Initialise model object.
 
         Params:
         - data_info: dictionary containing data information. Includes keys:
-            - data_og: pair of original data (X, y)
+            - data_og: a pair of original data (X, y)
             - X: tuple containing training, validation and test data, normalised and imputed accordingly.
             - y: tuple containing training, validation and test labels, normalised and imputed accordingly.
             - ids: tuple containing training, validation and test patient ids.
@@ -79,6 +83,10 @@ class DirVRNN(BaseModel):
         # Empty attribute which will be updated later.
         self.optimizer = None
 
+        # Useful for saving results and exps
+        exp_fd = f"exps/Dir_VRNN/{self.data_info['data_load_config']['data_name']}"
+        self.writer = writer.SummaryWriter(log_dir=utils.get_exp_run_path(exp_fd))
+
     def fit(self):
         """
         Training algorithm method for training DirVRNN model.
@@ -95,23 +103,22 @@ class DirVRNN(BaseModel):
 
         # Iterate through epochs
         for epoch in range(1, num_epochs + 1):
-            self._single_epoch_train(epoch)
-            self._single_epoch_val(epoch)
+            train_loss = self._single_epoch_train(epoch)
+            val_loss, val_history = self._single_epoch_val(epoch)
 
-    def test(self):
+            # Save results to Writer
+            self.writer.add_scalars("Training vs Validation Loss",
+                                    {"Train": train_loss, "Val": val_loss}, epoch)
+
+    def predict(self, X, y=None):
         """
-        Relevant outputs for model performance on test data after training.
+        Prediction method for DirVRNN model.
         """
 
-        # Set the model to evaluation mode
-        self.eval()
+        # Compute predictions
+        _, history = self._single_epoch_val(test_mode=True, X=X, y=y)
 
-        # Iterate through batches of test data loader
-        for batch_id, (X_batch, y_batch) in enumerate(self.test_loader):
-
-            # Compute Loss
-            loss = self.model(X_batch).item()
-
+        return history
 
     def _single_epoch_train(self, epoch):
         """
@@ -126,10 +133,9 @@ class DirVRNN(BaseModel):
 
         # Iterate through batches of train data loader
         for batch_id, (X_batch, y_batch) in enumerate(self.train_loader):
-
             # Apply optimiser
-            self.optimizer.zero_grad()                      # Set optimiser gradients to 0 for every batch
-            loss = self.forward(X_batch, y_batch)          # Model forward pass on batch data
+            self.optimizer.zero_grad()  # Set optimiser gradients to 0 for every batch
+            loss, _ = self.forward(X_batch, y_batch)  # Model forward pass on batch data
 
             # Back_propagate
             loss.backward()
@@ -147,31 +153,55 @@ class DirVRNN(BaseModel):
         print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
             epoch, train_loss / len(self.train_loader), 100.))
 
-    def _single_epoch_val(self, epoch):
+        return train_loss
+
+    def _single_epoch_val(self, epoch=None, test_mode=False, X=None, y=None):
         """
         Validate model over validation epoch for current data.
+
+        If test_mode set to True, then will use test data instead.
+        If X and y are not None, then will use these instead of the data loaders.
         """
 
         # Set the model to evaluation mode
         self.eval()
 
         # Set validation loss to 0 at the beginning of each epoch
-        loss = 0
+        loss, history = 0, {}
+
+        # Decide which loader to use based on test_mode flag
+        if test_mode:
+            if X is not None:
+                loader = DataLoader(TensorDataset(X, y))
+            else:
+                loader = self.test_loader
+        else:
+            loader = self.val_loader
 
         # Iterate through (the 1 batch) of validation data loader
-        for batch_id, (X_batch, y_batch) in enumerate(self.val_loader):
+        for batch_id, (X_batch, y_batch) in enumerate(loader):
 
-            # Compute Loss
-            loss = self.model(X_batch).item()
+            # Compute Loss and tracker history
+            loss, history = self.forward(X_batch, y_batch).item()
 
-            print("Val epoch: {}   [{:.5f} - {:.0f}%]".format(
-                epoch, loss.item(), 100. * batch_id / len(self.val_loader)),
-                end="\r")
+            if test_mode:
 
-        return loss
+                # Add test data to history to allow visualisation of results
+                history["X"] = X_batch
+                history["y"] = y_batch
+
+                # Print message
+                print("Test: [{:.5f} - {:.0f}%]".format(loss, 100. * batch_id / len(loader),
+                                                        end="\r"))
+
+            else:
+                print("Val epoch: {}   [{:.5f} - {:.0f}%]".format(
+                    epoch, loss, 100. * batch_id / len(loader),
+                    end="\r"))
+
+        return loss, history
 
 
 if __name__ == "__main__":
-
     # Do something
     pass

@@ -52,8 +52,8 @@ class BaseModel(nn.Module):
 
         # ====== Define Model Blocks ========
         # Define the encoder network - Computes alpha of Dirichlet distribution given h and z
-        self.encoder = MLP(input_size=self.latent_dim + self.latent_dim,       # input is z_extr_features and h
-                           output_size=self.K,                                 # output is alpha vector of size K
+        self.encoder = MLP(input_size=self.latent_dim + self.latent_dim,  # input is z_extr_features and h
+                           output_size=self.K,  # output is alpha vector of size K
                            act_fn="relu",
                            hidden_layers=self.gate_layers,
                            hidden_nodes=self.gate_nodes,
@@ -68,31 +68,31 @@ class BaseModel(nn.Module):
                            output_fn="tanh")
 
         # Define the prior network - computes Dirichlet alpha prior given previous cell state
-        self.prior = MLP(input_size=self.latent_dim,           # input is h at previous time step
-                         output_size=self.K,                   # output is alpha dirichlet for prior distribution
+        self.prior = MLP(input_size=self.latent_dim,  # input is h at previous time step
+                         output_size=self.K,  # output is alpha dirichlet for prior distribution
                          act_fn="relu",
                          hidden_layers=self.gate_layers,
                          hidden_nodes=self.gate_nodes,
                          output_fn="relu")
 
         # Define the output network - computes outcome prediction given predicted cluster assignments
-        self.predictor = MLP(input_size=self.K,                         # input is pi at last time step
-                             output_size=self.outcome_size,             # output is categorical parameter p
+        self.predictor = MLP(input_size=self.K,  # input is pi at last time step
+                             output_size=self.outcome_size,  # output is categorical parameter p
                              hidden_layers=self.gate_layers,
                              hidden_nodes=self.gate_nodes,
                              act_fn="relu",
                              output_fn="softmax")
 
         # Define feature extractors - feature representations for input observation and latent variables
-        self.phi_x = MLP(input_size=self.input_size,                    # input is set of observations.
-                         output_size=self.latent_dim,                   # output is extracted features.
+        self.phi_x = MLP(input_size=self.input_size,  # input is set of observations.
+                         output_size=self.latent_dim,  # output is extracted features.
                          hidden_layers=self.feat_extr_layers,
                          hidden_nodes=self.feat_extr_nodes,
                          act_fn="relu",
                          output_fn="tanh")
 
-        self.phi_z = MLP(input_size=self.latent_dim,                    # input is average representation vector.
-                         output_size=self.latent_dim,                   # output is extracted feature version of input.
+        self.phi_z = MLP(input_size=self.latent_dim,  # input is average representation vector.
+                         output_size=self.latent_dim,  # output is extracted feature version of input.
                          hidden_layers=self.feat_extr_layers,
                          hidden_nodes=self.feat_extr_nodes,
                          act_fn="relu",
@@ -114,6 +114,16 @@ class BaseModel(nn.Module):
         Params:
             - x: pytorch Tensor object of input data with shape (batch_size, max_seq_len, input_size);
             - y: pytorch Tensor object of corresponding outcomes with shape (batch_size, outcome_size).
+
+        Output:
+            - loss: pytorch Tensor object of loss value.
+            - history_objects: dictionary of relevant objects during training:
+                a) alpha parameters of Dirichlet distribution for each time step;
+                b) cluster assignment probabilities for each time step;
+                c) predicted outcomes for the last time step;
+                d) estimated cluster means at each time step;
+                e) estimated generated data at each time step;
+                f) cell state vector at each time step.
         """
 
         # ========= Define relevant variables and initialise variables ===========
@@ -124,6 +134,18 @@ class BaseModel(nn.Module):
         # Initialize the current hidden state as the null vector and cluster means as random objects in latent space
         h = torch.zeros(batch_size, self.hidden_size).to(x.device)
         cluster_means = torch.rand(size=[self.K, self.latent_dim]).to(x.device)
+
+        # Initialise history objects
+        history_objects = {
+            "alpha_prior": torch.zeros(size=[batch_size, seq_len, self.K]).to(x.device),
+            "alpha_enc": torch.zeros(size=[batch_size, seq_len, self.K]).to(x.device),
+            "est_pi": torch.zeros(size=[batch_size, seq_len, self.K]).to(x.device),
+            "est_cluster_means": torch.zeros(size=[seq_len, self.K, self.latent_dim]).to(x.device),
+            "est_outcomes": torch.zeros(size=[batch_size, self.outcome_size]).to(x.device),
+            "est_gen_mean": torch.zeros(size=[batch_size, seq_len, self.input_size]).to(x.device),
+            "est_gen_data": torch.zeros(size=[batch_size, seq_len, self.input_size]).to(x.device),
+            "cell_state": torch.zeros(size=[batch_size, seq_len, self.latent_dim]).to(x.device)
+        }
 
         # Initialise loss value
         loss = 0
@@ -154,7 +176,7 @@ class BaseModel(nn.Module):
                 h],
                 dim=-1
             )
-            mu_g, logvar_g = torch.chunk(                   # split output vector of decoder to 2 chunks
+            mu_g, logvar_g = torch.chunk(  # split output vector of decoder to 2 chunks
                 self.decoder(joint_dec_input),
                 chunks=2,
                 dim=-1
@@ -180,7 +202,6 @@ class BaseModel(nn.Module):
 
             # If last time step, add outcome prediction term
             if t == seq_len - 1:
-
                 # Predict outcome
                 y_pred = self.predictor(z_samples)
 
@@ -199,4 +220,16 @@ class BaseModel(nn.Module):
             )
             h = self.cell_state_update(state_update_input)
 
-        return loss
+            # --------- ADD OBJECTS TO HISTORY TRACKER ---------
+            history_objects["alpha_prior"][:, t, :] = alpha_prior
+            history_objects["alpha_enc"][:, t:] = alpha_enc
+            history_objects["est_pi"][:, t, :] = pi_samples
+            history_objects["est_cluster_means"][t, :, :] = cluster_means
+            history_objects["est_gen_mean"][:, t, :] = mu_g
+            history_objects["est_gen_data"][:, t, :] = torch.normal(mu_g, torch.sqrt(var_g), size=batch_size)
+            history_objects["cell_state"][:, t, :] = h
+
+        # Add outcome
+        history_objects["y_pred"] = y_pred
+
+        return loss, history_objects

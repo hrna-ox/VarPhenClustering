@@ -1,9 +1,0 @@
-{
-   "outcome_size": 4,
-   "latent_size": 10,
-   "gate_layers": 2,
-   "gate_nodes": 20,
-   "feat_extr_layers": 2,
-   "feat_extr_nodes": 20,
-   "num_clus": 6
-}

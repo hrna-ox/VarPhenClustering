@@ -1,0 +1,29 @@
+{
+  "data_config": {
+     "data_name": "MIMIC",
+     "target_window": 12,
+     "feat_set": "vit-sta",
+     "time_range": [
+        0,
+        10
+     ],
+     "train_test_ratio": 0.6,
+     "train_val_ratio": 0.4,
+     "seed": 2323
+  },
+  "model_config": {
+      "model_name": "DirVRNN",
+      "outcome_size": 4,
+      "latent_size": 10,
+      "gate_layers": 2,
+      "gate_nodes": 20,
+      "feat_extr_layers": 2,
+      "feat_extr_nodes": 20,
+      "num_clus": 6
+   },
+  "training_config": {
+      "lr": 0.001,
+      "epochs": 10,
+      "bs": 128
+   }
+}
