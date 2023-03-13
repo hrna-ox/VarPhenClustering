@@ -1,0 +1,40 @@
+{
+    "DATA_FD": "data/MIMIC/",
+    "SAVE_FD": "data/MIMIC/interim/",
+    "ID_COLUMNS": [
+        "subject_id",
+        "hadm_id",
+        "stay_id"
+    ],
+    "TIME_COLUMNS": [
+        "intime",
+        "outtime",
+        "charttime",
+        "deathtime"
+    ],
+    "WARDS_TO_REMOVE": [
+        "Unknown",
+        "Emergency Department",
+        "Obstetrics Postpartum",
+        "Obstetrics Antepartum",
+        "Obstetrics (Postpartum & Antepartum)",
+        "Psychiatry",
+        "Labor & Delivery",
+        "Observation",
+        "Emergency Department Observation"
+    ],
+    "AGE_LOWERBOUND": 18,
+    "PATIENT_INFO": [
+        "gender",
+        "anchor_age",
+        "anchor_year",
+        "dod"
+    ],
+    "NEXT_TRANSFER_INFO": [
+        "transfer_id",
+        "eventtype",
+        "careunit",
+        "intime",
+        "outtime"
+    ]
+}
