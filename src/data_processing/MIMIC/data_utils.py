@@ -2,7 +2,10 @@
 # INSERT FILE DESCRIPTION
 
 """
-Util functions to run Model. Includes Data loading, etc...
+Author: Henrique Aguiar
+Last Updated: 16 March 2023
+
+Utility functions
 """
 import os
 from typing import List, Union

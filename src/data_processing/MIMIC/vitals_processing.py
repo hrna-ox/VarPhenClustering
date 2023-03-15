@@ -4,7 +4,7 @@ import os
 import pandas as pd
 
 import src.data_processing.MIMIC.data_utils as utils
-import src.data_processing.MIMIC.test as test
+import src.data_processing.MIMIC.test_functions as test
 
 from src.data_processing.MIMIC.admissions_processing import SAVE_FD, DATA_FD
 

@@ -23,7 +23,7 @@
         "Observation",
         "Emergency Department Observation"
     ],
-    "AGE_LOWERBOUND": 18,
+    "AGE_LOWER_BOUND": 18,
     "PATIENT_INFO": [
         "gender",
         "anchor_age",

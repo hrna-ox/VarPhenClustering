@@ -1,11 +1,48 @@
 #!/usr/bin/env python3
 """
-Test file to check data has been correctly processed
+
+Author: Henrique Aguiar
+Contact: henrique.aguiar@eng.ox.ac.uk
+Last Updated: 15 March 2023
+
+Test file to check data has been correctly processed.
 """
+
+# Import libraries and functions
 import pandas as pd
 from tqdm import tqdm
 
 tqdm.pandas()
+
+
+# ================= RELEVANT FOR ADMISSION PROCESSING =================
+def test_unique_stays(df):
+    assert df["stay_id"].nunique() == df.shape[0]
+
+
+def test_non_missing_stays_and_times(df):
+    assert df["stay_id"].isna().sum() == 0
+    assert df["intime"].isna().sum() == 0
+    assert df["outtime"].isna().sum() == 0
+
+
+def test_single_admission_per_patient(df):
+    assert df["subject_id"].nunique() == df.shape[0]
+
+
+def test_outtime_after_intime(df):
+    assert df["outtime"].ge(df["intime"]).all()
+
+
+def test_ed_is_first_ward(df):
+    assert (df["eventtype"].eq("ED") & df["careunit"] == "Emergency Department").all()
+
+
+def test_is_correctly_merged(df):
+    assert df["subject_id"].nunique() == df.shape[0]
+    assert df["subject_id", "intime", "outtime", "stay_id"].isna().sum().sum() == 0
+    assert df["subject_id"].duplicated().sum() == 0
+
 
 def test_entrance_before_exit(entrance: pd.Series, exit: pd.Series) -> bool:
     """Check entrance times are NOT observed after Exit times, or both values are missing"""
@@ -20,7 +57,7 @@ def test_exit_before_next_entrance(cur_exit: pd.Series, next_entrance: pd.Series
     """Check exit of current admission is observed before entrance to consequent admission, or next is missing"""
 
     diff = (next_entrance - cur_exit).dt.total_seconds()  # Difference in seconds
-    missing = next_entrance.isna()   # bool indicating next admission is missing
+    missing = next_entrance.isna()  # bool indicating next admission is missing
 
     return (diff.ge(0) | missing).all()
 
