@@ -45,7 +45,7 @@ PATIENT_INFO: characteristic information for each patient.
 NEXT_TRANSFER_INFO: list of important info to keep related to the subsequent transfer from ED.
 """
 
-with open("src/data_processing/MIMIC/MIMIC_PROCESSING_DEFAULT_CONFIG.json", "r") as f:
+with open("src/data_processing/MIMIC/MIMIC_PROCESSING_DEFAULT_VARS.json", "r") as f:
     DEFAULT_CONFIG = json.load(f)
     f.close()
 
@@ -54,6 +54,30 @@ if not os.path.exists(DEFAULT_CONFIG["SAVE_FD"]):
 
 
 # ============================ AUXILIARY FUNCTIONS ============================
+
+
+def _compute_second_transfer_info(df: pd.DataFrame, time_col, target_cols):
+    """
+    Given transfer data for a unique id, compute the second transfer as given by time_col.
+
+    return: pd.Series with corresponding second transfer info.
+    """
+    time_info = df[time_col]
+    second_transfer_time = time_info[time_info != time_info.min()].min()
+
+    # Identify second transfer info - can be empty, unique, or repeated instances
+    second_transfer = df[df[time_col] == second_transfer_time]
+
+    if second_transfer.empty:
+        output = [df.name, df["hadm_id"].iloc[0], df["transfer_id"].iloc[0]] + [np.nan] * (len(target_cols) - 3)
+        return pd.Series(data=output, index=target_cols)
+
+    elif second_transfer.shape[0] == 1:
+        return pd.Series(data=second_transfer.squeeze().values, index=target_cols)
+
+    else:  # There should be NONE
+        print(second_transfer)
+        raise ValueError("Something's gone wrong! No expected repeated second transfers with the same time.")
 
 
 # ============================ MAIN FILE COMPUTATION ============================
@@ -120,41 +144,56 @@ def main():
 
     # Within the list of transfers, subset to list of above patients, and identify the first ward for each patient.
     patients_ed_first_ward = (transfers_core
-                              .query("subject_id in @admissions_ed_S1.subject_id.values")   # subset to current pats.
-                              .groupby("subject_id", as_index=True)                         # compute per patient
+                              .query("subject_id in @admissions_ed_S1.subject_id.values")  # subset to current pats.
+                              .groupby("subjet_id", as_index=True)  # compute per patient
                               .progress_apply(lambda x: x[x.intime == x.intime.min()])  # select first transfer intime
                               .reset_index(drop=True)
                               .query("careunit == 'Emergency Department'")  # remove patients with non-ED first ward
                               .query("eventtype == 'ED'")  # remove patients with non-ED first event type
                               )
 
-    # Merge information
-    test = (patients_ed_first_ward
-            .merge(admissions_ed_S1, on=["subject_id", "hadm_id", "intime", "outtime"], how="left")
-            .dropna(subset=["intime_y"])
-            )
+    # Select only those admissions from S1 that match the admissions we identified previously
+    admissions_ed_S2 = (patients_ed_first_ward
+                        # Merge will consider only those rows from S1 and patients_ed_first_ward
+                        .merge(admissions_ed_S1, on=["subject_id", "hadm_id", "intime", "outtime"], how="inner")
+                        # Drop Rows that have missing values in the stay_id column
+                        .dropna(subset=["stay_id"])
+                        .reset_index(drop=True)
+                        )
 
     # Check correct processing
-    tests.test_is_correctly_merged(test)
-    tests.test_ed_is_first_ward(test)
+    tests.test_is_correctly_merged(admissions_ed_S2)
 
-    admissions_ed_S2.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_S2.csv", index=True, header=True)
-
-    # Identify First Ward for each patient given the patient id
-    transfers_first_ward = utils.endpoint_target_ids(transfers_core, "subject_id", "intime", mode="min")
-    ed_first_transfer = transfers_first_ward[(transfers_first_ward["eventtype"] == "ED") &
-                                             (transfers_first_ward["careunit"] == "Emergency Department")]
-
-    # Subset to admissions with ED as first transfer
-    admissions_ed_S2 = utils.subsetted_by(admissions_ed_S1, ed_first_transfer,
-                                          ["subject_id", "hadm_id", "intime", "outtime"])
-    transfers_ed_S2 = utils.subsetted_by(transfers_core, admissions_ed_S2, ["subject_id", "hadm_id"])
+    # Save to CSV
     admissions_ed_S2.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_S2.csv", index=True, header=True)
 
     """
-    Consider only those admissions for which they did not have a subsequent transfer to a Special ward, which includes
-    Partum and Psychiatry wards. The full list of wards is identified in WARDS TO REMOVE
+    Step 3: We look at eventual patient hospital transfers.
+        a) For each patient, consider all admissions after ED (defined as intime > ED intime)
+        b) Identify patients without further admissions;
+        c) Identify patients with further admissions into non-admissable wards (e.g. Partum, Psychiatry);
+        d) Remove patients satisfying (b) and (c) from the list of patients.
     """
+
+    # Compute list of >2 ward transfers for our patients
+    admissible_transfers_post_ED = (transfers_core
+                                    .query("subject_id in @admissions_ed_S2.subject_id.values")  # subset to current
+                                            # pats.
+                                    .groupby("subject_id", as_index=True)  # get list of transfers per patient
+                                    .progress_apply(lambda x: (x
+                                                               .query("intime > @x.intime.min()")
+                                                               .sort_values("intime")
+                                                               )
+                                                    )  # Select transfer after first transfer, and sort values
+                                    .reset_index(drop=True)  # Reset index
+                                    .query("careunit != 'Emergency Department' & eventtype != 'ED'")
+                                            # Remove any ED wards that are subsequent to the original ED admission
+                                    .groupby("subject_id", as_index=True)  # Filter per patient
+                                    .filter(lambda x: ~ x.careunit.isin(DEFAULT_CONFIG["WARDS_TO_REMOVE"]).any())
+                                            # Remove patients with transfers to irrelevant wards
+                                    .reset_index(drop=True)  # Reset index again after groupby
+                                    )
+
     # Remove admissions transferred to irrelevant wards (Partum, Psychiatry). Furthermore, EDObs is also special.
     # Missing check that second intime is after ED outtime
     transfers_second_ward = utils.compute_second_transfer(transfers_ed_S2, "subject_id", "intime",

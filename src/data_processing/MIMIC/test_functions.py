@@ -35,13 +35,15 @@ def test_outtime_after_intime(df):
 
 
 def test_ed_is_first_ward(df):
-    assert (df["eventtype"].eq("ED") & df["careunit"] == "Emergency Department").all()
+    assert (df["eventtype"].eq("ED") & df["careunit"].eq("Emergency Department")).all()
 
 
 def test_is_correctly_merged(df):
     assert df["subject_id"].nunique() == df.shape[0]
-    assert df["subject_id", "intime", "outtime", "stay_id"].isna().sum().sum() == 0
+    assert df[["subject_id", "intime", "outtime", "stay_id"]].isna().sum().sum() == 0
     assert df["subject_id"].duplicated().sum() == 0
+    test_outtime_after_intime(df)         # Check previous tests
+    test_ed_is_first_ward(df)             # Check previous tests
 
 
 def test_entrance_before_exit(entrance: pd.Series, exit: pd.Series) -> bool:
