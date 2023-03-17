@@ -55,29 +55,32 @@ if not os.path.exists(DEFAULT_CONFIG["SAVE_FD"]):
 
 # ============================ AUXILIARY FUNCTIONS ============================
 
-
-def _compute_second_transfer_info(df: pd.DataFrame, time_col, target_cols):
+def _compute_second_patient_transfer(df: pd.DataFrame) -> pd.Series:
     """
-    Given transfer data for a unique id, compute the second transfer as given by time_col.
+    Given dataset df DataFrame of patient Transfer, compute the second transfer.
 
-    return: pd.Series with corresponding second transfer info.
+    Params:
+    - df: pd.DataFrame (or Series) with patient transfer information, including careunit, eventtype, intime
+    and outime.
+
+    Outputs:
+    - pd.Series with second transfer information, including
+
     """
-    time_info = df[time_col]
-    second_transfer_time = time_info[time_info != time_info.min()].min()
 
-    # Identify second transfer info - can be empty, unique, or repeated instances
-    second_transfer = df[df[time_col] == second_transfer_time]
+    # Get first intime for transfer
+    _df = df[df["intime"] == df["intime"].min()]
 
-    if second_transfer.empty:
-        output = [df.name, df["hadm_id"].iloc[0], df["transfer_id"].iloc[0]] + [np.nan] * (len(target_cols) - 3)
-        return pd.Series(data=output, index=target_cols)
+    # If multiple such occurrences, select the one with the earliest outtime
+    if _df.shape[0] > 1:
+        _df = _df.query("outtime == @_df.outtime.min()")
 
-    elif second_transfer.shape[0] == 1:
-        return pd.Series(data=second_transfer.squeeze().values, index=target_cols)
+    # If there are still multiple such transfers with the registered intime and outtime, select the first one
+    if _df.shape[0] > 1:
+        _df = _df.iloc[0, :]
 
-    else:  # There should be NONE
-        print(second_transfer)
-        raise ValueError("Something's gone wrong! No expected repeated second transfers with the same time.")
+    # Return the second transfer information
+    return _df
 
 
 # ============================ MAIN FILE COMPUTATION ============================
@@ -178,7 +181,7 @@ def main():
     # Compute list of >2 ward transfers for our patients
     admissible_transfers_post_ED = (transfers_core
                                     .query("subject_id in @admissions_ed_S2.subject_id.values")  # subset to current
-                                            # pats.
+                                    # pats.
                                     .groupby("subject_id", as_index=True)  # get list of transfers per patient
                                     .progress_apply(lambda x: (x
                                                                .query("intime > @x.intime.min()")
@@ -186,31 +189,31 @@ def main():
                                                                )
                                                     )  # Select transfer after first transfer, and sort values
                                     .reset_index(drop=True)  # Reset index
-                                    .query("careunit != 'Emergency Department' & eventtype != 'ED'")
-                                            # Remove any ED wards that are subsequent to the original ED admission
                                     .groupby("subject_id", as_index=True)  # Filter per patient
                                     .filter(lambda x: ~ x.careunit.isin(DEFAULT_CONFIG["WARDS_TO_REMOVE"]).any())
-                                            # Remove patients with transfers to irrelevant wards
+                                    # Remove patients with transfers to irrelevant wards
                                     .reset_index(drop=True)  # Reset index again after groupby
                                     )
 
-    # Remove admissions transferred to irrelevant wards (Partum, Psychiatry). Furthermore, EDObs is also special.
-    # Missing check that second intime is after ED outtime
-    transfers_second_ward = utils.compute_second_transfer(transfers_ed_S2, "subject_id", "intime",
-                                                          transfers_ed_S2.columns)
-    transfers_to_relevant_wards = transfers_second_ward[
-        ~ transfers_second_ward.careunit.isin(DEFAULT_CONFIG["WARDS_TO_REMOVE"])]
-    admissions_ed_S3 = utils.subsetted_by(admissions_ed_S2, transfers_to_relevant_wards, ["subject_id", "hadm_id"])
+    # Compute the first ward after ED (if exists)
+    wards_immediately_after_ED = (admissible_transfers_post_ED
+                                  .groupby("subject_id", as_index=True)  # Compute second ward per patient
+                                  .progress_apply(_compute_second_patient_transfer)  # Compute second ward info
+                                  .reset_index(drop=True)
+                                  )
 
-    # ADD patient core information and next Transfer Information.
-    patients_S3 = admissions_ed_S3.subject_id.values
-    admissions_ed_S3.loc[:, DEFAULT_CONFIG["PATIENT_INFO"]] = patients_core.set_index("subject_id").loc[
-        patients_S3, DEFAULT_CONFIG["PATIENT_INFO"]].values
+    # Finally, merge the dataframes and remove empty rows for
+    admissions_ed_S3 = (wards_immediately_after_ED
+                        .merge(admissions_ed_S2, on="subject_id", how="right", suffices="_next")
+                        .dropna(subset=["stay_id"])
+                        )
 
-    for col in DEFAULT_CONFIG["NEXT_TRANSFER_INFO"]:
-        admissions_ed_S3.loc[:, "next_" + col] = transfers_to_relevant_wards.set_index("subject_id").loc[
-            patients_S3, col].values
-
+    # Add patient core information and compute age
+    admissions_ed_S3 = (admissions_ed_S3
+                        .merge(patients_core, on="subject_id", how="inner")
+                        .assign(age=lambda x: x.intime.dt.year - x.anchor_year + x.anchor_age)
+                        .reset_index(drop=True)
+                        )
     # Compute age and save
     admissions_ed_S3["age"] = admissions_ed_S3.intime.dt.year - admissions_ed_S3["anchor_year"] + admissions_ed_S3[
         "anchor_age"]
