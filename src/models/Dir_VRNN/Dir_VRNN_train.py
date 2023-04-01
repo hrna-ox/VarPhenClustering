@@ -68,13 +68,15 @@ class DirVRNN(BaseModel):
         outcome_size = y_train.shape[-1]
 
         # Prepare data for training
-        train_dataset, val_dataset = TensorDataset(X_train, y_train), TensorDataset(X_val, y_val)
+        train_dataset = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
+        val_dataset = TensorDataset(torch.from_numpy(X_val), torch.from_numpy(y_val))
+   
         self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        self.val_loader = DataLoader(val_dataset)
+        self.val_loader = DataLoader(val_dataset, batch_size=X_val.shape[0])
 
         # Prepare data for evaluating
-        test_dataset = TensorDataset(X_test, y_test)
-        self.test_loader = DataLoader(test_dataset)
+        test_dataset = TensorDataset(torch.from_numpy(X_test), torch.from_numpy(y_test))
+        self.test_loader = DataLoader(test_dataset, batch_size=X_test.shape[0])
 
         # Finally initialise parent model
         super().__init__(input_size=input_size, outcome_size=outcome_size,
@@ -97,7 +99,7 @@ class DirVRNN(BaseModel):
         num_epochs, lr = train_params["epochs"], train_params["lr"]
 
         # Useful for model training
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
 
         # ============ TRAINING LOOP ==============
 
@@ -172,7 +174,7 @@ class DirVRNN(BaseModel):
         # Decide which loader to use based on test_mode flag
         if test_mode:
             if X is not None:
-                loader = DataLoader(TensorDataset(X, y))
+                loader = DataLoader(TensorDataset(torch.from_numpy(X), torch.from_numpy(y)), batch_size=X.shape[0])
             else:
                 loader = self.test_loader
         else:
@@ -182,7 +184,7 @@ class DirVRNN(BaseModel):
         for batch_id, (X_batch, y_batch) in enumerate(loader):
 
             # Compute Loss and tracker history
-            loss, history = self.forward(X_batch, y_batch).item()
+            loss, history = self.forward(X_batch, y_batch)
 
             if test_mode:
 
@@ -199,6 +201,8 @@ class DirVRNN(BaseModel):
                     epoch, loss, 100. * batch_id / len(loader),
                     end="\r"))
 
+            break    # Stop after first batch
+            
         return loss, history
 
 

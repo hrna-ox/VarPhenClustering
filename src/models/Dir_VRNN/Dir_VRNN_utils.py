@@ -93,8 +93,9 @@ def compute_gaussian_log_lik(x, mu, var):
     )  # (batch_size)
 
     # Compute log likelihood
-    _input_size = list(x.size)[-1]
-    log_lik = - 0.5 * _input_size * torch.log(2 * np.pi) - 0.5 * torch.prod(var, dim=-1, keepdim=False) - exp_term
+    _input_size = x.size(dim=-1)
+    pi = torch.acos(torch.zeros(1)) * 2
+    log_lik = - 0.5 * _input_size * torch.log(2 * pi) - 0.5 * torch.prod(var, dim=-1, keepdim=False) - exp_term
 
     return torch.mean(log_lik)
 

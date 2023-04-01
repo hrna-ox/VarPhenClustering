@@ -76,7 +76,7 @@ class BaseModel(nn.Module):
                          output_fn="relu")
 
         # Define the output network - computes outcome prediction given predicted cluster assignments
-        self.predictor = MLP(input_size=self.K,  # input is pi at last time step
+        self.predictor = MLP(input_size=self.latent_dim,  # input is generated samples at last time step
                              output_size=self.outcome_size,  # output is categorical parameter p
                              hidden_layers=self.gate_layers,
                              hidden_nodes=self.gate_nodes,
@@ -132,7 +132,7 @@ class BaseModel(nn.Module):
         batch_size, seq_len, input_size = x.size()
 
         # Initialize the current hidden state as the null vector and cluster means as random objects in latent space
-        h = torch.zeros(batch_size, self.hidden_size).to(x.device)
+        h = torch.zeros(batch_size, self.latent_dim).to(x.device)
         cluster_means = torch.rand(size=[self.K, self.latent_dim]).to(x.device)
 
         # Initialise history objects
@@ -144,7 +144,8 @@ class BaseModel(nn.Module):
             "est_outcomes": torch.zeros(size=[batch_size, self.outcome_size]).to(x.device),
             "est_gen_mean": torch.zeros(size=[batch_size, seq_len, self.input_size]).to(x.device),
             "est_gen_data": torch.zeros(size=[batch_size, seq_len, self.input_size]).to(x.device),
-            "cell_state": torch.zeros(size=[batch_size, seq_len, self.latent_dim]).to(x.device)
+            "cell_state": torch.zeros(size=[batch_size, seq_len, self.latent_dim]).to(x.device),
+            "pred_loss": torch.zeros(size=[batch_size, seq_len]).to(x.device)
         }
 
         # Initialise loss value
@@ -165,7 +166,8 @@ class BaseModel(nn.Module):
             alpha_enc = self.encoder(joint_enc_input)
 
             # Sample cluster distribution from Dirichlet with parameter alpha_enc
-            pi_samples = Utils.sample_dirichlet(alpha=alpha_enc)
+            # pi_samples = Utils.sample_dirichlet(alpha=alpha_enc)
+            pi_samples = torch.divide(alpha_enc, torch.sum(alpha_enc, dim=-1, keepdim=True))
 
             # Average over clusters to estimate latent variable
             z_samples = torch.matmul(pi_samples, cluster_means)
@@ -195,7 +197,9 @@ class BaseModel(nn.Module):
             log_lik = Utils.compute_gaussian_log_lik(x_t, mu_g, var_g)
 
             # KL divergence
-            kl_div = Utils.compute_dirichlet_kl_div(alpha_enc, alpha_prior)
+            # kl_div = Utils.compute_dirichlet_kl_div(alpha_enc, alpha_prior)
+            quot = torch.log(torch.divide(alpha_enc, alpha_prior + 1e-8) + 1e-8)
+            kl_div = torch.mean(torch.sum(alpha_enc * quot, dim=-1))
 
             # Add to loss tracker
             loss += log_lik - kl_div
@@ -222,14 +226,18 @@ class BaseModel(nn.Module):
 
             # --------- ADD OBJECTS TO HISTORY TRACKER ---------
             history_objects["alpha_prior"][:, t, :] = alpha_prior
-            history_objects["alpha_enc"][:, t:] = alpha_enc
+            history_objects["alpha_enc"][:, t] = alpha_enc
             history_objects["est_pi"][:, t, :] = pi_samples
             history_objects["est_cluster_means"][t, :, :] = cluster_means
             history_objects["est_gen_mean"][:, t, :] = mu_g
-            history_objects["est_gen_data"][:, t, :] = torch.normal(mu_g, torch.sqrt(var_g), size=batch_size)
+            """
+            history_objects["est_gen_data"][:, t, :] = torch.normal(mu_g, torch.sqrt(var_g), size=(batch_size))
+            """
             history_objects["cell_state"][:, t, :] = h
+            
 
         # Add outcome
         history_objects["y_pred"] = y_pred
+        history_objects["pred_loss"][:, t] = pred_loss
 
         return loss, history_objects

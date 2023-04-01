@@ -214,6 +214,7 @@ def main():
                         .assign(age=lambda x: x.intime.dt.year - x.anchor_year + x.anchor_age)
                         .reset_index(drop=True)
                         )
+
     # Compute age and save
     admissions_ed_S3["age"] = admissions_ed_S3.intime.dt.year - admissions_ed_S3["anchor_year"] + admissions_ed_S3[
         "anchor_age"]

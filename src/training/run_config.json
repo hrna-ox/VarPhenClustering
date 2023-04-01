@@ -13,17 +13,16 @@
   },
   "model_config": {
       "model_name": "DirVRNN",
-      "outcome_size": 4,
       "latent_size": 10,
       "gate_layers": 2,
       "gate_nodes": 20,
       "feat_extr_layers": 2,
       "feat_extr_nodes": 20,
-      "num_clus": 6
+      "num_clus": 2
    },
   "training_config": {
       "lr": 0.001,
-      "epochs": 10,
+      "epochs": 5,
       "bs": 128
    }
 }

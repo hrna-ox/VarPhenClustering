@@ -69,8 +69,8 @@ class MLP(nn.Module):
         for layer in self.layers[:-1]:
             x_ = self.act_fn(layer(x_))
 
-        # Output Layer
-        output = self.output_fn(layer(x_))
+        # Output Layer is the last layer
+        output = self.output_fn(self.layers[-1](x_))
 
         return output
 
@@ -80,6 +80,9 @@ class MLP(nn.Module):
 
         if fn_str.lower() == "relu":
             return nn.ReLU()
+        
+        elif fn_str.lower() == "softmax":
+            return nn.Softmax()
 
         elif fn_str.lower() == "sigmoid":
             return nn.Sigmoid()
