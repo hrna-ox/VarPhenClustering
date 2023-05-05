@@ -55,9 +55,11 @@ if not os.path.exists(DEFAULT_CONFIG["SAVE_FD"]):
 
 # ============================ AUXILIARY FUNCTIONS ============================
 
-def _compute_second_patient_transfer(df: pd.DataFrame) -> pd.Series:
+def _compute_earliest_transfer_if_exists(df: pd.DataFrame) -> pd.Series:
     """
-    Given dataset df DataFrame of patient Transfer, compute the second transfer.
+    Given dataset df DataFrame of patient admission transfers information, compute the second transfer.
+    df includes already ONLY transfers that are not the first transfer. Therefore, we want to select the
+    earliest transfer.
 
     Params:
     - df: pd.DataFrame (or Series) with patient transfer information, including careunit, eventtype, intime
@@ -148,12 +150,13 @@ def main():
     # Within the list of transfers, subset to list of above patients, and identify the first ward for each patient.
     patients_ed_first_ward = (transfers_core
                               .query("subject_id in @admissions_ed_S1.subject_id.values")  # subset to current pats.
-                              .groupby("subjet_id", as_index=True)  # compute per patient
+                              .groupby("subject_id", as_index=True)  # compute per patient
                               .progress_apply(lambda x: x[x.intime == x.intime.min()])  # select first transfer intime
                               .reset_index(drop=True)
                               .query("careunit == 'Emergency Department'")  # remove patients with non-ED first ward
                               .query("eventtype == 'ED'")  # remove patients with non-ED first event type
                               )
+    # Note that the code above does not care that some transfers might be recorded multiple times (e.g. same intime)
 
     # Select only those admissions from S1 that match the admissions we identified previously
     admissions_ed_S2 = (patients_ed_first_ward
@@ -164,7 +167,7 @@ def main():
                         .reset_index(drop=True)
                         )
 
-    # Check correct processing
+    # Check correct processing - i.e. did the correct admissions and patients get merged?
     tests.test_is_correctly_merged(admissions_ed_S2)
 
     # Save to CSV
@@ -178,7 +181,7 @@ def main():
         d) Remove patients satisfying (b) and (c) from the list of patients.
     """
 
-    # Compute list of >2 ward transfers for our patients
+    # Compute list of second or later ward transfers for our patients
     admissible_transfers_post_ED = (transfers_core
                                     .query("subject_id in @admissions_ed_S2.subject_id.values")  # subset to current
                                     # pats.
@@ -198,43 +201,65 @@ def main():
     # Compute the first ward after ED (if exists)
     wards_immediately_after_ED = (admissible_transfers_post_ED
                                   .groupby("subject_id", as_index=True)  # Compute second ward per patient
-                                  .progress_apply(_compute_second_patient_transfer)  # Compute second ward info
+                                  .progress_apply(_compute_earliest_transfer_if_exists)  # Compute second ward info
                                   .reset_index(drop=True)
                                   )
 
-    # Finally, merge the dataframes and remove empty rows for
-    admissions_ed_S3 = (wards_immediately_after_ED
-                        .merge(admissions_ed_S2, on="subject_id", how="right", suffices="_next")
-                        .dropna(subset=["stay_id"])
-                        )
+    # Finally, merge the dataframes and remove empty rows for stay id - this is also important for estimating ESI
+    ED_admissions_and_next_admissions = (wards_immediately_after_ED
+                                         .merge(admissions_ed_S2, on=["subject_id", "hadm_id"], how="right",
+                                                suffixes=("_next", ""))
+                                         .dropna(subset=["stay_id"])
+                                         )
 
     # Add patient core information and compute age
-    admissions_ed_S3 = (admissions_ed_S3
+    admissions_ed_S3 = (ED_admissions_and_next_admissions
                         .merge(patients_core, on="subject_id", how="inner")
-                        .assign(age=lambda x: x.intime.dt.year - x.anchor_year + x.anchor_age)
                         .reset_index(drop=True)
                         )
 
-    # Compute age and save
-    admissions_ed_S3["age"] = admissions_ed_S3.intime.dt.year - admissions_ed_S3["anchor_year"] + admissions_ed_S3[
-        "anchor_age"]
+    # Check Correct Processing
+    tests.test_next_transfer_is_consistent(admissions_ed_S3)
+    tests.test_is_correctly_merged(admissions_ed_S3)
+
+    # Save to CSV
     admissions_ed_S3.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_S3.csv", index=True, header=True)
 
     """
-    Step 4: Patients must have an age older than AGE LOWER BOUND
+    Step 4: 
+        Feature Extraction - Derive age and ESI. Convert DoD to datetime.
+        Cohort Selection based on age (above admissable threshold) and ESI (2, 3, 4) - missing not allowed.
+        Remove mismatches between admission times (intime, outtime, intime_next, outtime_next) <= deattime.
+        Removing features that are not needed.
     """
-    # Compute age and Remove below AGE LOWER BOUND
-    admissions_ed_S4 = admissions_ed_S3[admissions_ed_S3["age"] >= DEFAULT_CONFIG["AGE_LOWER_BOUND"]]
+
+    # Feature Processing
+    admissions_ed_S4 = (admissions_ed_S3
+                        .assign(age=lambda x: x.intime.dt.year - x.anchor_year + x.anchor_age)  # derive age
+                        # derive ESI from triage_ed data
+                        .assign(ESI=lambda x: triage_ed.set_index("stay_id").loc[x.stay_id.values, "acuity"].values)
+                        .assign(deathtime=lambda x: pd.to_datetime(x.dod, format="%Y-%m-%d"))
+                        .query("age >= @DEFAULT_CONFIG['AGE_LOWER_BOUND']")  # remove patients below age threshold
+                        .query("ESI in [2,3,4]")  # remove patients with ESI 1 or 5
+                        .dropna(subset=["ESI"])  # Remove patients with missing ESI
+                        .query("intime.dt.date <= deathtime | deathtime.isna()")  # Remove if intime > deathtime
+                        .query("outtime.dt.date <= deathtime | deathtime.isna()")  # Remove if outtime > deathtime
+                        .query("intime_next.dt.date <= deathtime | deathtime.isna()")  # Remove if intt_next > deathtime
+                        .query(
+        "outtime_next.dt.date <= deathtime | deathtime.isna()")  # Remove if outt_next > deathtime
+                        .drop(labels=["anchor_year", "anchor_age", "anchor_year_group", "dod"], axis=1)  # remove feats
+                        )
+
+    # Check Correct Processing
+    tests.age_ESI_processed_successfully(admissions_ed_S4)
+
+    # Save to CSV
     admissions_ed_S4.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_S4.csv", index=True, header=True)
 
-    """
-    Step 5: Add ESI information, and subset to patients with ESI values and between 2, 3, 4.
-    ESI values of 1 and 5 are edge cases (nothing wrong with them, or in extremely critical condition).
-    """
-    # Compute and remove ESI NAN, ESI 1 and ESI 5 and save
-    admissions_ed_S4["ESI"] = triage_ed.set_index("stay_id").loc[admissions_ed_S4.stay_id.values, "acuity"].values
-    admissions_ed_S5 = admissions_ed_S4[~ admissions_ed_S4["ESI"].isna()]
-    # admissions_ed_S5 = admissions_ed_S5[~ admissions_ed_S5["ESI"].isin([1, 5])]
+    # Final processing Check
+    tests.admissions_processed_correctly(admissions_ed_S4)
+    admissions_ed_S4.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_intermediate.csv", index=True, header=True)
 
-    # Save data
-    admissions_ed_S5.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_intermediate.csv", index=True, header=True)
+
+if __name__ == "__main__":
+    main()
