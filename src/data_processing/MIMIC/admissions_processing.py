@@ -2,7 +2,7 @@
 Processing script for initial ED admission processing.
 
 Author: Henrique Aguiar
-Last Updated: 15 March 2023
+Last Updated: 15 May 2023
 
 This files processes MIMIC-IV-ED admissions. The following steps are performed:
 
@@ -29,11 +29,12 @@ tqdm.pandas()
 # Test functions to check processing
 import src.data_processing.MIMIC.test_functions as tests
 
+
 # ------------------------------------ // --------------------------------------
 """
 List of variables used for processing. These are pre-defined in the PROCESSING_DEFAULT_CONFIG file.
 
-Data_FD: where the data is saved.
+Data_FD: where the raw data is saved.
 SAVE_FD: folder path of interim data saving.
 ID_COLUMNS: identifiers for admissions, patients and hospital stays.
 TIME_COLUMNS: list of datetime object columns.

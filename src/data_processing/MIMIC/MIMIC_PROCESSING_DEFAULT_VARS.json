@@ -36,5 +36,24 @@
         "careunit",
         "intime",
         "outtime"
-    ]
+    ],
+    "VITALS_RENAMING_DIC": {
+        "temperature": "TEMP",
+        "heartrate": "HR",
+        "resprate": "RR",
+        "o2sat": "SPO2",
+        "sbp": "SBP",
+        "dbp": "DBP"
+    },
+    "VITALS_TIME_VARS": [
+        "intime", 
+        "outtime", 
+        "next_intime", 
+        "next_outtime", 
+        "dod"
+    ],
+    "MIN_NUM_OBSERVS": 3,
+    "NA_PROP_THRESH": 0.6,
+    "RESAMPLING_RULE": "1H",
+    "LAST_OBVS_TIME_TO_EXIT": 1.5
 }
