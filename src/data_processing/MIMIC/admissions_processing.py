@@ -225,7 +225,7 @@ def main():
 
     """
     Step 4: 
-        Feature Extraction - Derive age and ESI. Convert DoD to datetime.
+        Feature Extraction - Derive age and ESI. Convert DoD to datetime. Convert gender to 1 (M) or 0 (F).
         Cohort Selection based on age (above admissable threshold) and ESI (2, 3, 4) - missing not allowed.
         Remove mismatches between admission times (intime, outtime, intime_next, outtime_next) <= deattime.
         Removing features that are not needed.
@@ -237,6 +237,7 @@ def main():
                         # derive ESI from triage_ed data
                         .assign(ESI=lambda x: triage_ed.set_index("stay_id").loc[x.stay_id.values, "acuity"].values)
                         .assign(deathtime=lambda x: pd.to_datetime(x.dod, format="%Y-%m-%d"))
+                        .assign(gender=lambda x: x.loc[:, "gender"].replace(["M", "F"], [1,0]))
                         .query("age >= @DEFAULT_CONFIG['AGE_LOWER_BOUND']", engine="python")  # remove patients below age threshold
                         .query("ESI in [2,3,4]")  # remove patients with ESI 1 or 5
                         .dropna(subset=["ESI"])  # Remove patients with missing ESI

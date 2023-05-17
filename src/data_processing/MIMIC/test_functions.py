@@ -190,3 +190,5 @@ def stays_have_sufficient_data(df, info_dic):
 #     assert test_is_complete_ids(df, "stay_id", col, "intime", "outtime", "time_to_end_min", "time_to_end_max")
 #
 #     print("Vitals correctly computed! Safe to go ahead.")
+
+# ========== OUTCOME TESTING ===========
