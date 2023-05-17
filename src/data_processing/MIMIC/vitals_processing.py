@@ -1,5 +1,5 @@
 """"
-Processing script for extracting vital information.
+Processing script for extracting vital sign information.
 
 Author: Henrique Aguiar
 Last Updated: 15 May 2023
@@ -29,8 +29,6 @@ tqdm.pandas()
 # Test functions to check processing
 import src.data_processing.MIMIC.test_functions as tests
 
-import src.data_processing.MIMIC.data_utils as utils
-
 
 # ------------------------------------ Configuration Params --------------------------------------
 """
@@ -59,6 +57,30 @@ if not os.path.exists(DEFAULT_CONFIG["SAVE_FD"]):
     os.makedirs(DEFAULT_CONFIG["SAVE_FD"])
 
 
+# ============= AUXILIARY FUNCTIONS ===============
+
+def _resample(x, time_feats, resampling_rule):
+	"Resample the dataset given time to end column based on the resampling rule."
+
+	# Check dataframe is sorted
+	assert x["time_to_end"].is_monotonic_decreasing
+
+	# Create intermediate output to resample
+	_x = x[["time_to_end"] + time_feats]
+	resampled_x = _x.resample(on="time_to_end", rule=resampling_rule, closed="left", label="left").mean()
+
+	# Add resampling array
+	resampled_x.index.name = "sampled_time_to_end"
+	resampled_x.reset_index(drop=False, inplace=True)
+
+	# Now add all other vars
+	static_vars = [col for col in x.columns if col not in time_feats + ["time_to_end"]]
+	pat_static_info = x[static_vars].iloc[0, :]
+
+	# Add to resampled data
+	resampled_x[static_vars] = pat_static_info
+
+	return resampled_x
 
 
 def main():
@@ -76,7 +98,6 @@ def main():
 		# Run admissions_processing.py file otherwise
 		os.system("python -m src.data_processing.MIMIC.admissions_processing.py")
 
-
 	"""
 	Load observation tables (vitals) and previously processed admissions
 
@@ -91,14 +112,14 @@ def main():
 	
 	vital_signs_ed = pd.read_csv(
 					DEFAULT_CONFIG["DATA_FD"] + "ed/vitalsign.csv", 
-					index_col=0, 
+					index_col=None, 
 					header=0, 
 					low_memory=False,
 					parse_dates=["charttime"]) 
 
 	# Re-check admissions intermediate, vitals were correctly processed/loaded
 	tests.admissions_processed_correctly(adm_inter)
-	tests.test_is_complete_ids(vital_signs_ed, "stay_id")    # No NaN on stay id column.
+	tests.test_is_complete_ids(vital_signs_ed, "subject_id", "stay_id")    # No NaN on stay id column.
 
 	# ------------------------------------- // -------------------------------------
 	"""
@@ -109,63 +130,93 @@ def main():
 
 	# Merge data on stay id (there are no NaNs)
 	vitals_S1 = (vital_signs_ed
-	      		.merge(right=adm_inter, how="inner", on="stay_id") # merge on stay_id (keep those that are in adm_inter)
+	      		.merge(right=adm_inter, how="inner", on=["subject_id", "stay_id"]) # merge on stay_id (keep those that are in adm_inter)
 			    .rename(DEFAULT_CONFIG["VITALS_RENAMING_DIC"], axis=1) # Rename columns
-			    .query("chartime >= intime")       # Observations after intime
-			    .query("chartime <= outtime")      # Observations before outtime
-		  )
+			    .query("charttime >= intime")       # Observations after intime
+			    .query("charttime <= outtime")      # Observations before outtime
+	)
 	
-	# Save
+	# Test processing and save
+	tests.charttime_between_intime_outtime(vitals_S1)
+	tests.ids_subset_of_cohort(vitals_S1, adm_inter)
 	vitals_S1.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_S1.csv", index=True, header=True)
+	print("=", end="/r")
 	
 	"""
 	Step 2: Remove admissions with too much missing data. This includes:
+	a) less than MIN_NUM_OBSERVS observations
+	b) at least NA_PROP_THRESH * # observations NAs on any vital sign
+	"""
+
+	vitals_S2 = (vitals_S1
+	      .groupby("stay_id", as_index=True)
+	      .filter(lambda x: x.shape[0] >= DEFAULT_CONFIG["MIN_NUM_OBSERVS"] and
+	       			x[DEFAULT_CONFIG["VITALS_RENAMING_DIC"].values()].isna().sum().le(
+						x.shape[0] * DEFAULT_CONFIG["NA_PROP_THRESH"]
+						).all()
+					)
+		.reset_index(drop=True)
+	)
+
+	# Test and save
+	tests.stays_have_sufficient_data(vitals_S2, DEFAULT_CONFIG)
+	vitals_S2.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_S2.csv", index=True, header=True)
+	print("==", end="/r")
+
+	"""
+	Step 3: Compute time to end for each charttime measurement.
+	Resample based on time to end.
+	"""
+
+	vitals_S3 = (vitals_S2
+	      	.assign(time_to_end=lambda x: x["outtime"] - x["charttime"])
+		    .sort_values(by=["stay_id", "time_to_end"], ascending=[True, False])
+		    .groupby("stay_id", as_index=False)
+		    .progress_apply(lambda x: _resample(x, 
+									time_feats = list(DEFAULT_CONFIG["VITALS_RENAMING_DIC"].values()),
+									resampling_rule = DEFAULT_CONFIG["RESAMPLING_RULE"])
+							)
+		    .reset_index(drop=True)
+			)
 	
-	"""
-
-
-	vitals_S1 = utils.subsetted_by(vital_signs_ed, admissions, "stay_id")
-	admissions.set_index("stay_id", inplace=True)
-	vitals_S1[["intime", "outtime"]] = admissions.loc[vitals_S1.stay_id.values, ["intime", "outtime"]].values
-	vitals_S1.to_csv(SAVE_FD + "vitals_S1.csv", index=True, header=True)
+	# Test and save
+	# 
+	vitals_S3.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_S3.csv", index=True, header=True)
+	print("===", end="/r")
 
 	"""
+	Step 4: Apply step 2 with the blocked data
+	"""
+
+	vitals_S4 = (vitals_S3
+		.groupby("stay_id", as_index=True)
+		.filter(lambda x: x.shape[0] >= DEFAULT_CONFIG["MIN_NUM_OBSERVS"] and
+				x[DEFAULT_CONFIG["VITALS_RENAMING_DIC"].values()].isna().sum().le(
+					x.shape[0] * DEFAULT_CONFIG["NA_PROP_THRESH"]
+					).all()
+				)
+	.reset_index(drop=True)
+	)
+
+	# Test and save
+	vitals_S4.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_S4.csv", index=True, header=True)
+	print("====", end="/r")
+
+	"""
+	Step 5 - ensure the closest observation to admission end is not too far away
+	"""
+
+	# Filter only admissions with time_to_end min below threshold
+	vitals_S5 = (vitals_S4
+	      	.groupby("stay_id", as_index=True)
+			.filter(lambda x: x["sampled_time_to_end"].dt.total_seconds().min() <=   # Check <= for minimum sampled time
+					DEFAULT_CONFIG["LAST_OBVS_TIME_TO_EXIT"] * 3600   # Convert to horus
+			))
+		
 	
-	"""
-	# Subset Endpoints of vital observations according to ED endpoints
-	vitals_S2 = vitals_S1[vitals_S1["charttime"].between(vitals_S1["intime"], vitals_S1["outtime"])]
-	vitals_S2.rename(VITALS_NAMING_DIC, axis=1, inplace=True)
-	vitals_S2.to_csv(SAVE_FD + "vitals_S2.csv", index=True, header=True)
+	# Test and save
+	vitals_S5.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_intermediate.csv", index=True, header=True)
+	print("=====", end="/r")
 
-	"""
-	Remove admissions with high amounts of missingness.
-	"""
-	# Subset to patients with enough data
-	vital_feats = list(VITALS_NAMING_DIC.values())
-	# vitals_S3 = utils.remove_adms_high_missingness(vitals_S2, vital_feats, "stay_id",
-	# 	                                     min_count=admission_min_count, min_frac=vitals_na_threshold)
-	vitals_S3 = vitals_S2
-	vitals_S3.to_csv(SAVE_FD + "vitals_S3.csv", index=True, header=True)
-
-	"""
-	Compute time to end of admission, and group observations into blocks.
-	"""
-	# Resample admissions according to group length
-	vitals_S4 = utils.compute_time_to_end(vitals_S3, id_key="stay_id", time_id="charttime", end_col="outtime")
-	vitals_S4 = utils.conversion_to_block(vitals_S4, id_key="stay_id", rule=resampling_rule, time_vars=vital_feats,
-		                            static_vars=["stay_id", "intime", "outtime"])
-	vitals_S4.to_csv(SAVE_FD + "vitals_S4.csv", index=True, header=True)
-
-	"""
-	Apply Step 3 again with the blocked data.
-	"""
-	# Ensure blocks satisfy conditions - min counts, proportion of missingness AND time to final outcome
-	vitals_S5 = utils.remove_adms_high_missingness(vitals_S4, vital_feats, "stay_id",
-	                                     min_count=admission_min_count, min_frac=vitals_na_threshold)
-
-	"""
-	Consider those admissions with observations with at most an observations 1.5 hours before outtime 
-	"""
-	vitals_S5 = vitals_S5[vitals_S5["time_to_end_min"].dt.total_seconds() <= admission_min_time_to_outtime * 3600]
-	vitals_S5.to_csv(SAVE_FD + "vitals_intermediate.csv", index=True, header=True)
-
+if __name__ == "__main__":
+	main()

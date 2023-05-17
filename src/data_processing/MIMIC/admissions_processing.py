@@ -36,11 +36,13 @@ List of variables used for processing. These are pre-defined in the PROCESSING_D
 
 Data_FD: where the raw data is saved.
 SAVE_FD: folder path of interim data saving.
+
 ID_COLUMNS: identifiers for admissions, patients and hospital stays.
 TIME_COLUMNS: list of datetime object columns.
 WARDS_TO_REMOVE: list of special wards where patients were transferred to and which represent unique populations. This
 list includes Partum and Psychiatry wards, as well as further ED observations, which generally take place when 
 the hospital is full.
+
 AGE_LOWER_BOUND: minimum age of patients.
 PATIENT_INFO: characteristic information for each patient.
 NEXT_TRANSFER_INFO: list of important info to keep related to the subsequent transfer from ED.
@@ -213,14 +215,12 @@ def main():
                                          .dropna(subset=["stay_id"])
                                          )
 
-    # Add patient core information and compute age
+    # Add patient core information
     admissions_ed_S3 = (ED_admissions_and_next_admissions
                         .merge(patients_core, on="subject_id", how="inner")
                         .reset_index(drop=True)
                         )
-    # Compute age and save
-    admissions_ed_S3["age"] = admissions_ed_S3.intime.dt.year - admissions_ed_S3["anchor_year"] + admissions_ed_S3[
-        "anchor_age"]
+    # save
     admissions_ed_S3.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_S3.csv", index=True, header=True)
 
     """
@@ -237,14 +237,13 @@ def main():
                         # derive ESI from triage_ed data
                         .assign(ESI=lambda x: triage_ed.set_index("stay_id").loc[x.stay_id.values, "acuity"].values)
                         .assign(deathtime=lambda x: pd.to_datetime(x.dod, format="%Y-%m-%d"))
-                        .query("age >= @DEFAULT_CONFIG['AGE_LOWER_BOUND']")  # remove patients below age threshold
+                        .query("age >= @DEFAULT_CONFIG['AGE_LOWER_BOUND']", engine="python")  # remove patients below age threshold
                         .query("ESI in [2,3,4]")  # remove patients with ESI 1 or 5
                         .dropna(subset=["ESI"])  # Remove patients with missing ESI
-                        .query("intime.dt.date <= deathtime | deathtime.isna()")  # Remove if intime > deathtime
-                        .query("outtime.dt.date <= deathtime | deathtime.isna()")  # Remove if outtime > deathtime
-                        .query("intime_next.dt.date <= deathtime | deathtime.isna()")  # Remove if intt_next > deathtime
-                        .query(
-        "outtime_next.dt.date <= deathtime | deathtime.isna()")  # Remove if outt_next > deathtime
+                        .query("intime.dt.date <= deathtime | deathtime.isna()", engine="python")  # Remove if intime > deathtime
+                        .query("outtime.dt.date <= deathtime | deathtime.isna()", engine="python")  # Remove if outtime > deathtime
+                        .query("intime_next.dt.date <= deathtime | deathtime.isna()", engine="python")  # Remove if intt_next > deathtime
+                        .query("outtime_next.dt.date <= deathtime | deathtime.isna()", engine="python")  # Remove if outt_next > deathtime
                         .drop(labels=["anchor_year", "anchor_age", "anchor_year_group", "dod"], axis=1)  # remove feats
                         )
 

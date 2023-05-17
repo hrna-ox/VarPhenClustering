@@ -5,7 +5,7 @@ Author: Henrique Aguiar
 Contact: henrique.aguiar@eng.ox.ac.uk
 Last Updated: 15 March 2023
 
-Test file to check data has been correctly processed.
+Auxiliary test functions to check data has been processed correctly.
 """
 
 # Import libraries and functions
@@ -121,7 +121,7 @@ def admissions_processed_correctly(df: pd.DataFrame):
     test_admission_times_before_death(df)
 
     # Uniqueness of main.py id columns
-    test_is_unique_ids(df, "subject_id", "hadm_id", "stay_id", "next_transfer_id")
+    test_is_unique_ids(df, "subject_id", "hadm_id", "stay_id", "transfer_id_next")
 
     # Completeness of id columns
     test_is_complete_ids(df, "subject_id", "stay_id", "intime", "outtime")
@@ -130,6 +130,40 @@ def admissions_processed_correctly(df: pd.DataFrame):
 
 
 # ========== RELEVANT FOR VITAL PROCESSING ==========
+
+def charttime_between_intime_outtime(df):
+    "Check whether charttime observations are within ed emergency endpoints."
+
+    cond1 = df["charttime"].le(df["outtime"]).all()
+    cond2 = df["charttime"].ge(df["intime"]).all()
+
+    assert cond1 and cond2
+
+def ids_subset_of_cohort(cur_df, cohort_df):
+    "Check whether stay id and subject id are subset of cohort data."
+
+    cond1 = cur_df["subject_id"].isin(cohort_df["subject_id"]).all()
+    cond2 = cur_df["stay_id"].isin(cohort_df["stay_id"]).all()
+
+    assert cond1 
+    assert cond2
+
+def stays_have_sufficient_data(df, info_dic):
+    "Check remaining stays have sufficient data based on info dic parameters"
+
+    # Extract info
+    feats = info_dic["VITALS_RENAMING_DIC"].values()
+    max_na_prop = info_dic["NA_PROP_THRESH"]
+    min_num = info_dic["MIN_NUM_OBSERVS"]
+
+    # COnditions
+    cond1 = df.groupby("stay_id").filter(lambda x: x.shape[0] < min_num).empty
+    cond2 = df.groupby("stay_id").filter(lambda x: (x[feats].isna().sum() > (
+                                    max_na_prop * x.shape[0])).any()).empty
+    
+    assert cond1
+    assert cond2
+
 # def vitals_processed_correctly(df: pd.DataFrame):
 #     """
 #     Function to check intermediate processing of vitals is correct. The following are done:

@@ -48,9 +48,9 @@
     "VITALS_TIME_VARS": [
         "intime", 
         "outtime", 
-        "next_intime", 
-        "next_outtime", 
-        "dod"
+        "intime_next", 
+        "outtime_next", 
+        "deathtime"
     ],
     "MIN_NUM_OBSERVS": 3,
     "NA_PROP_THRESH": 0.6,

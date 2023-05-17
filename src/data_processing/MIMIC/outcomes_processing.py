@@ -1,42 +1,50 @@
-# Processing
+""""
+Processing script for computing admission outcome.
 
+Author: Henrique Aguiar
+Last Updated: 15 May 2023
 
+Requirements:
+- Run -admissions_processing.py file first.
+- Run -vitals_processing.py file first (Already checks for admissions_processing).
+
+This files processes MIMIC-IV-ED outcome data for each admission. The following steps are performed:
+
+	- Subset patients based on the cohort previously processed for admissions and vitals.
+	- Identify windows of time after the admission to target the outcomes.
+	- Compute targets based on a) death, b) ICU, c) Discharge, or d) any medical Ward.
+"""
+
+# Import Libraries
 import datetime as dt
+import json
 import os
 
 import pandas as pd
 from tqdm import tqdm
-
-import src.data_processing.MIMIC.data_utils as utils
-import src.data_processing.MIMIC.test_functions as test
-from src.data_processing.MIMIC.admissions_processing import SAVE_FD, DATA_FD
-from src.data_processing.MIMIC.vitals_processing import resampling_rule
-
 tqdm.pandas()
 
-"""
+import src.data_processing.MIMIC.data_utils as utils
+import src.data_processing.MIMIC.test_functions as tests
 
-Run -admissions_processing.py and -vitals_processing.py first.
+# LOAD CONFIGURATION 
+with open("src/data_processing/MIMIC/MIMIC_PROCESSING_DEFAULT_VARS.json", "r") as f:
+    DEFAULT_CONFIG = json.load(f)
+    f.close()
 
-Processing Steps:
-- Subset to admissions identified previously.
-- Identify windows after admission.
-- Define targets as one of:
-a) Death, b) ICU, c) Discharge or d) Ward.
-
-
-Missing Test Functions for Admissions and vitals.
-"""
+if not os.path.exists(DEFAULT_CONFIG["SAVE_FD"]):
+    os.makedirs(DEFAULT_CONFIG["SAVE_FD"])
 
 
 def main():
 
     # ------------------------ Checking Data Loaded -------------------------------
     try:
-        assert os.path.exists(SAVE_FD + "admissions_intermediate.csv")
-        assert os.path.exists(SAVE_FD + "vitals_intermediate.csv")
-    except Exception:
-        raise ValueError(f"Run admissions_processing.py and vitals_processing.py prior to running '{__file__}'")
+        assert os.path.exists(DEFAULT_CONFIG["SAVE_FD"] + "admissions_intermediate.csv")
+        assert os.path.exists(DEFAULT_CONFIG["SAVE_FD"] + "vitals_intermediate.csv")
+    except AssertionError:
+        raise ValueError(f"Running admissions_processing.py and vitals_processing.py prior to running '{__file__}'")
+        os.system("python -m src.data_processing.MIMIC.vitals_processing")
 
     # ------------------------ Configuration params --------------------------------
     """
@@ -46,38 +54,30 @@ def main():
     VITALS_TIME_VARS: datetime object variables for observation data.
     """
 
-    TIME_VARS = ["intime", "outtime", "next_intime", "next_outtime", "dod"]
-    VITALS_TIME_VARS = ["intime", "outtime", "time_to_end_min", "time_to_end_max",
-                        "time_to_end", f"sampled_time_to_end({resampling_rule})"]
+    # TIME_VARS = ["intime", "outtime", "next_intime", "next_outtime", "dod"]
+    # VITALS_TIME_VARS = ["intime", "outtime", "time_to_end_min", "time_to_end_max",
+    #                     "time_to_end", f"sampled_time_to_end({resampling_rule})"]
 
-    # ------------------------ Data Loading ------------------------------
 
     """
-    Load data tables, including pre-processed and raw tables.
-    
-    admissions: processed dataframe of ED summary admission data.
-    vitals: processed dataframe of ED observation data.
-    transfers_core: dataframe with list of transfers within the hospital system.
+    Data Loading
     """
-    admissions = pd.read_csv(SAVE_FD + "admissions_intermediate.csv", index_col=0, header=0, parse_dates=TIME_VARS)
-    vitals = pd.read_csv(SAVE_FD + "vitals_intermediate.csv", index_col=0, header=0, parse_dates=VITALS_TIME_VARS)
-    transfers_core = pd.read_csv(DATA_FD + "core/transfers.csv", index_col=None, header=0,
-                                 parse_dates=["intime", "outtime"])
-    vitals = utils.convert_to_timedelta(vitals, f"sampled_time_to_end({resampling_rule})", "time_to_end",
-                                        "time_to_end_min",
-                                        "time_to_end_max")
+    vitals = pd.read_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_intermediate.csv", 
+                         index_col=0, header=0, 
+                         parse_dates=DEFAULT_CONFIG["VITALS_TIME_VARS"]
+                         )
+    transfers_core = pd.read_csv(DEFAULT_CONFIG["DATA_FD"] + "core/transfers.csv", 
+                            index_col=None, header=0, parse_dates=["intime", "outtime"])
+    vitals["sampled_time_to_end"] = pd.to_timedelta(vitals.loc[:, "sampled_time_to_end"])
+
 
     # Check correct computation of admissions
-    test.admissions_processed_correctly(admissions)
-    test.vitals_processed_correctly(vitals)
-
-    # ------------------------ Targets Processing -----------------------------
+    # tests.vitals_processed_correctly(vitals)
 
     """
-    Process Target Information. Subset transfers and vitals to the relevant set of admissions
+    Step 1: Subset the set of transfers to the already processed cohort.
     """
 
-    admissions_subset = utils.subsetted_by(admissions, vitals, ["stay_id"])
     transfers_subset = utils.subsetted_by(transfers_core, admissions_subset, ["subject_id", "hadm_id"])
     vitals["chartmax"] = vitals["outtime"] - vitals["time_to_end"]
     vitals["hadm_id"] = admissions.set_index("stay_id").loc[vitals.stay_id.values, "hadm_id"].values
