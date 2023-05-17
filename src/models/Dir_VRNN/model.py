@@ -51,8 +51,8 @@ class BaseModel(nn.Module):
         self.feat_extr_nodes = feat_extr_nodes
 
         # Parameters for clusters
-        self.clus_means = torch.rand(torch.rand(size=[self.K, self.latent_dim]))
-        self.log_clus_vars = torch.rand(torch.rand(size=[self.K]))
+        self.clus_means = torch.rand(int(self.K), int(self.latent_dim))
+        self.log_clus_vars = torch.rand(int(self.K), )
 
         # ====== Define Model Blocks ========
         # Define the encoder network - Computes alpha of Dirichlet distribution given h and z
@@ -137,8 +137,6 @@ class BaseModel(nn.Module):
 
         # Initialize the current hidden state as the null vector and cluster means as random objects in latent space
         h = torch.zeros(batch_size, self.latent_dim).to(x.device)
-        cluster_means = torch.rand(size=[self.K, self.latent_dim]).to(x.device)
-        cluster_vars = torch.rand()
 
         # Initialise history objects
         history_objects = {
@@ -168,7 +166,7 @@ class BaseModel(nn.Module):
                 h],
                 dim=-1  # Concatenate with cell state in last dimension
             )
-            alpha_enc = self.encoder(joint_enc_input)
+            alpha_enc = self.encoder(joint_enc_input) + 1e-6  # Add small value to avoid numerical instability
 
             # Sample cluster distribution from Dirichlet with parameter alpha_enc
             pi_samples = utils.sample_dirichlet(alpha=alpha_enc)
@@ -176,7 +174,7 @@ class BaseModel(nn.Module):
 
             # Average over clusters to estimate latent variable - we do this via sampling from the clusters
             clus_samples = utils.sample_normal(self.clus_means, self.log_clus_vars)
-            z_samples = torch.matmul(pi_samples, cluster_means)
+            z_samples = torch.matmul(pi_samples, clus_samples)
 
             # Compute decoder mean/var parameters by extracting features from latent and concatenating with hidden state
             joint_dec_input = torch.cat([
@@ -190,6 +188,21 @@ class BaseModel(nn.Module):
                 dim=-1
             )
             var_g = torch.exp(logvar_g)
+            try:
+                assert torch.all(var_g > 0)
+            except AssertionError as e:
+                print("\nvarg_g:\n", var_g)
+                print("\nlogvar_g:\n", logvar_g)
+                print("\njoint dec input:\n", joint_dec_input)
+                print("\nh:\n", h)
+                print("\nz samples:\n", z_samples)
+                print("\nClus samples:\n", clus_samples)
+                print("\nPi samples:\n", pi_samples)
+                print("\nAlpha enc:\n", alpha_enc)
+                print("\njoint enc input:\n", joint_enc_input)
+                print("\nx_t:\n", x_t)
+
+                raise ValueError("Variance is not positive definite.")
 
             # Compute prior parameters
             alpha_prior = self.prior(h)
@@ -203,7 +216,7 @@ class BaseModel(nn.Module):
             log_lik = utils.compute_gaussian_log_lik(x_t, mu_g, var_g)
 
             # KL divergence
-            kl_div = utils.compute_dirichlet_kl_div(alpha_enc, alpha_prior)
+            kl_div = utils.compute_dirichlet_kl_div(alpha_enc+1e-8, alpha_prior+1e-8)
             # quot = torch.log(torch.divide(alpha_enc, alpha_prior + 1e-8) + 1e-8)
             # kl_div = torch.mean(torch.sum(alpha_enc * quot, dim=-1))
 
@@ -245,4 +258,4 @@ class BaseModel(nn.Module):
         history_objects["y_pred"] = y_pred
         history_objects["pred_loss"][:, t] = pred_loss
 
-        return loss, history_objects
+        return - loss, history_objects      # want to maximise loss, so return negative loss

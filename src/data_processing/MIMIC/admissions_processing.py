@@ -106,7 +106,7 @@ def main():
     """
 
     # Print Information
-    print("/n/n ======= PROCESSING ADMISSIONS ======= /n/n")
+    print("\n\n ======= PROCESSING ADMISSIONS ======= \n\n")
 
     # Hospital Core
     patients_core = pd.read_csv(DEFAULT_CONFIG["DATA_FD"] + "core/patients.csv",

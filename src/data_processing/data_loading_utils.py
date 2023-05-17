@@ -20,7 +20,7 @@ HAVEN_STATIC = ['age', 'gender', 'is_elec', 'is_surg']
 HAVEN_OUTCOME_NAMES = ['Healthy', 'Death', 'ICU', 'Card']
 
 MIMIC_PARSE_TIME_VARS = ["intime", "outtime"]
-MIMIC_PARSE_TD_VARS = ["sampled_time_to_end", "time_to_end", "time_to_end_min", "time_to_end_max"]
+MIMIC_PARSE_TD_VARS = ["sampled_time_to_end"]
 MIMIC_VITALS = ["TEMP", "HR", "RR", "SPO2", "SBP", "DBP"]
 MIMIC_STATIC = ["age", "gender", "ESI"]
 MIMIC_OUTCOME_NAMES = ["De", "I", "W", "Di"]

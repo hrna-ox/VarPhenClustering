@@ -90,7 +90,7 @@ def main():
     """
 
     # Print Information
-    print("/n/n ======= PROCESSING VITALS ======= /n/n")
+    print("\n\n ======= PROCESSING VITALS ======= \n\n")
 
 
     try:  # Check admissions intermediate processed exists

@@ -57,7 +57,7 @@ def sample_dirichlet(alpha):
     X = _sample_differentiable_gamma_dist(alphas)
 
     # Compute sum across rows
-    X_sum = torch.sum(X, dim=0, keepdim=True)
+    X_sum = torch.sum(X, dim=1, keepdim=True)
 
     # Generate Dirichlet samples by normalising
     dirichlet_samples = torch.divide(X, X_sum + 1e-8)
