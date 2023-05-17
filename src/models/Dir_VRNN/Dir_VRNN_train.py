@@ -135,6 +135,7 @@ class DirVRNN(BaseModel):
 
         # Iterate through batches of train data loader
         for batch_id, (X_batch, y_batch) in enumerate(self.train_loader):
+
             # Apply optimiser
             self.optimizer.zero_grad()  # Set optimiser gradients to 0 for every batch
             loss, _ = self.forward(X_batch, y_batch)  # Model forward pass on batch data

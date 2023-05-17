@@ -25,7 +25,6 @@ import numpy as np
 from tqdm import tqdm
 tqdm.pandas()
 
-import src.data_processing.MIMIC.data_utils as utils
 import src.data_processing.MIMIC.test_functions as tests
 
 # LOAD CONFIGURATION 
