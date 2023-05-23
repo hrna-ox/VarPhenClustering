@@ -6,6 +6,8 @@ Contact: henrique.aguiar@eng.ox.ac.uk
 Last Updated: 15 March 2023
 
 Auxiliary test functions to check data has been processed correctly.
+
+MISSING TYPE HINTING.
 """
 
 # Import libraries and functions
@@ -50,6 +52,33 @@ def test_next_transfer_is_consistent(df):
     assert (~ df["eventtype_next"].eq("ED") | df["eventtype_next"].isna()).all()  # next event is missing or not ED
     assert (df["intime_next"].ge(df["outtime"]) | df["intime_next"].isna()).all()  # next intime >= outtime (if exists)
     assert (df["outtime_next"].ge(df["intime_next"]) | df["outtime_next"].isna()).all()  # next outtime >= next intime
+
+
+def test_next_transfer_admissible(df, non_allowed_wards):
+    """
+    This function determines whether the identification of next transfers makes sense. Checks:
+    - missingness is equally spread throughout next transfer information (i.e. either info is present or not).
+    - next transfer intime > ED transfer outtime
+    - next transfers outtime > next transfer intime
+    - next transfer id != current transfer id
+    - next eventytpe is not ED and next careunit is not "Emergency Department" or any of the not allowed wards.
+    """
+
+    # Check missingness equally spread throughout next transfer info
+    next_info_is_missing = df["transfer_id_next"].isna()
+    assert df[next_info_is_missing][["transfer_id_next",
+                                "eventtype_next",
+                                "careunit_next",
+                                "intime_next",
+                                "outtime_next"]].isna().all().all()
+
+    # Now check time conditions
+    assert (df["intime_next"].ge(df["outtime"]) | next_info_is_missing).all()      # intime_next after outtime
+    assert (df["outtime_next"].ge(df["intime_next"]) | next_info_is_missing).all()
+
+    # Check ids and ward matches
+    assert (df["transfer_id_next"] != df["transfer_id"] | next_info_is_missing).all()    # ids pre-post don't match
+    assert not (df["careunit_next"].isin(non_allowed_wards)).any()     # no careunit allowed
 
 
 def age_ESI_processed_successfully(df):
@@ -100,8 +129,6 @@ def test_is_complete_ids(df: pd.DataFrame, *args):
         output = output and not has_missing
 
     assert output
-
-
 def admissions_processed_correctly(df: pd.DataFrame):
     """
     Function to check intermediate processing of admissions is correct. The following are done:

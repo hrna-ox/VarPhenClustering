@@ -106,13 +106,13 @@ def main():
     """
 
     # Print Information
-    print("\n\n ======= PROCESSING ADMISSIONS ======= \n\n")
+    print("\n\n ======= PROCESSING MIMIC ADMISSIONS ======= \n\n")
 
     # Hospital Core
     patients_core = pd.read_csv(DEFAULT_CONFIG["DATA_FD"] + "core/patients.csv",
                                 index_col=None, header=0, low_memory=False)
     transfers_core = pd.read_csv(DEFAULT_CONFIG["DATA_FD"] + "core/transfers.csv",
-                                 index_col=None, header=0, low_memory=False, parse_dates=["intime", "outtime"])
+                                index_col=None, header=0, low_memory=False, parse_dates=["intime", "outtime"])
 
     # ED Admission
     admissions_ed = pd.read_csv(DEFAULT_CONFIG["DATA_FD"] + "ed/edstays.csv",
@@ -155,13 +155,13 @@ def main():
 
     # Within the list of transfers, subset to list of above patients, and identify the first ward for each patient.
     patients_ed_first_ward = (transfers_core
-                              .query("subject_id in @admissions_ed_S1.subject_id.values")  # subset to current pats.
-                              .groupby("subject_id", as_index=True)  # compute per patient
-                              .progress_apply(lambda x: x[x.intime == x.intime.min()])  # select first transfer intime
-                              .reset_index(drop=True)
-                              .query("careunit == 'Emergency Department'")  # remove patients with non-ED first ward
-                              .query("eventtype == 'ED'")  # remove patients with non-ED first event type
-                              )
+                        .query("subject_id in @admissions_ed_S1.subject_id.values")  # subset to current pats.
+                        .groupby("subject_id", as_index=True)  # compute per patient
+                        .progress_apply(lambda x: x[x.intime == x.intime.min()])  # select first transfer intime
+                        .reset_index(drop=True)
+                        .query("careunit == 'Emergency Department'")  # remove patients with non-ED first ward
+                        .query("eventtype == 'ED'")  # remove patients with non-ED first event type
+                        )
     # Note that the code above does not care that some transfers might be recorded multiple times (e.g. same intime)
 
     # Select only those admissions from S1 that match the admissions we identified previously
@@ -193,9 +193,9 @@ def main():
                                     # pats.
                                     .groupby("subject_id", as_index=True)  # get list of transfers per patient
                                     .progress_apply(lambda x: (x
-                                                               .query("intime > @x.intime.min()")
-                                                               .sort_values("intime")
-                                                               )
+                                                            .query("intime > @x.intime.min()")
+                                                            .sort_values("intime")
+                                                            )
                                                     )  # Select transfer after first transfer, and sort values
                                     .reset_index(drop=True)  # Reset index
                                     .groupby("subject_id", as_index=True)  # Filter per patient
@@ -206,24 +206,25 @@ def main():
 
     # Compute the first ward after ED (if exists)
     wards_immediately_after_ED = (admissible_transfers_post_ED
-                                  .groupby("subject_id", as_index=True)  # Compute second ward per patient
-                                  .progress_apply(_compute_earliest_transfer_if_exists)  # Compute second ward info
-                                  .reset_index(drop=True)
-                                  )
+                                .groupby("subject_id", as_index=True)  # Compute second ward per patient
+                                .progress_apply(_compute_earliest_transfer_if_exists)  # Compute second ward info
+                                .reset_index(drop=True)
+                                )
 
     # Finally, merge the dataframes and remove empty rows for stay id - this is also important for estimating ESI
     ED_admissions_and_next_admissions = (wards_immediately_after_ED
-                                         .merge(admissions_ed_S2, on=["subject_id", "hadm_id"], how="right",
-                                                suffixes=("_next", ""))
-                                         .dropna(subset=["stay_id"])
-                                         )
+                                        .merge(admissions_ed_S2, on=["subject_id", "hadm_id"], how="right",
+                                            suffixes=("_next", ""))
+                                        .dropna(subset=["stay_id"])
+                                        )
 
     # Add patient core information
     admissions_ed_S3 = (ED_admissions_and_next_admissions
                         .merge(patients_core, on="subject_id", how="inner")
                         .reset_index(drop=True)
                         )
-    # save
+    # Test and save
+    
     admissions_ed_S3.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_S3.csv", index=True, header=True)
 
     """

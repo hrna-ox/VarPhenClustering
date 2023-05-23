@@ -138,9 +138,9 @@ def main():
                 .rename(DEFAULT_CONFIG["VITALS_RENAMING_DIC"], axis=1) # Rename columns
                 .query("charttime >= intime")       # Observations after intime
                 .query("charttime <= outtime")      # Observations before outtime
-    )
+                )
 
-    # Test processing and save
+    # Test observations within admission bounds
     tests.charttime_between_intime_outtime(vitals_S1)
     tests.ids_subset_of_cohort(vitals_S1, adm_inter)
     vitals_S1.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_S1.csv", index=True, header=True)
@@ -153,14 +153,15 @@ def main():
     """
 
     vitals_S2 = (vitals_S1
-          .groupby("stay_id", as_index=True)
-          .filter(lambda x: x.shape[0] >= DEFAULT_CONFIG["MIN_NUM_OBSERVS"] and
+                .groupby("stay_id", as_index=True)
+                .filter(lambda x: 
+                    x.shape[0] >= DEFAULT_CONFIG["MIN_NUM_OBSERVS"] and
                     x[DEFAULT_CONFIG["VITALS_RENAMING_DIC"].values()].isna().sum().le(
                         x.shape[0] * DEFAULT_CONFIG["NA_PROP_THRESH"]
-                        ).all()
-                    )
-        .reset_index(drop=True)
-    )
+                    ).all()
+                )
+                .reset_index(drop=True)
+                )
 
     # Test and save
     tests.stays_have_sufficient_data(vitals_S2, DEFAULT_CONFIG)
