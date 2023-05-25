@@ -93,37 +93,65 @@ def main():
     try:
         assert os.path.exists(DEFAULT_CONFIG["SAVE_FD"] + "admissions_intermediate.csv")
         assert os.path.exists(DEFAULT_CONFIG["SAVE_FD"] + "vitals_intermediate.csv")
-    except AssertionError:
-        raise ValueError(f"Running admissions_processing.py and vitals_processing.py prior to running '{__file__}'")
+
+    except AssertionError as e:
+        print(f"Running admissions_processing.py and vitals_processing.py prior to running '{__file__}'")
         os.system("python -m src.data_processing.MIMIC.vitals_processing")
 
     # ------------------------ Configuration params --------------------------------
 
     """
-    Data Loading
+    Data Loading:
+    - Load admission and vital data that was previously processed.
+    - transfers_core: information about the route patients take throughout the hospital.
+    - admissions_core: information about the hospital admissions for different patients.
     """
 
     # Print Information
     print("\n\n ======== PROCESSING OUTCOMES ======== \n\n")
 
-    # Load data
-    admissions = pd.read_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_intermediate.csv",
-                             index_col=0, header=0, 
-                             parse_dates=["intime", "outtime", "intime_next", "outtime_next", "deathtime"])
-    vitals = pd.read_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_intermediate.csv", 
-                         index_col=0, header=0, 
-                         parse_dates=DEFAULT_CONFIG["VITALS_TIME_VARS"]
-                         )
-    transfers_core = pd.read_csv(DEFAULT_CONFIG["DATA_FD"] + "core/transfers.csv", 
-                            index_col=None, header=0, parse_dates=["intime", "outtime"])
-    vitals["sampled_time_to_end"] = pd.to_timedelta(vitals.loc[:, "sampled_time_to_end"])
+    # Load previously processed data
+    adm_proc = pd.read_csv(
+        DEFAULT_CONFIG["SAVE_FD"] + "admissions_intermediate.csv",
+        index_col=0, 
+        header=0, 
+        parse_dates=["intime", "outtime", "intime_next", "outtime_next", "deathtime"]
+    )
+    vit_proc = (
+        pd.read_csv(
+        DEFAULT_CONFIG["SAVE_FD"] + "vitals_intermediate.csv", 
+        index_col=0, 
+        header=0, 
+        parse_dates=DEFAULT_CONFIG["VITALS_TIME_VARS"]
+        )
+        .reset_index(drop=False)
+        .assign(sampled_time_to_end=lambda x: pd.to_timedelta(x["sampled_time_to_end"]))  # pd does not load timedelta automatically
+    )
 
 
-    # Check correct computation of admissions
-    # tests.vitals_processed_correctly(vitals)
+    # Load core info
+    transfers_core = pd.read_csv(
+        DEFAULT_CONFIG["DATA_FD"] + "core/transfers.csv", 
+        index_col=None, 
+        header=0, 
+        parse_dates=["intime", "outtime"]
+    )
+    admissions_core = pd.read_csv(
+        DEFAULT_CONFIG["DATA_FD"] + "core/admissions.csv",
+        index_col=None,
+        header=0,
+        parse_dates=["admittime", "dischtime", "deathtime", "edregtime", "edouttime"]
+    )
+
+    # Check correct computation of admissions and vitals
+    tests.test_admissions_processed_correctly(adm_proc)
+    tests.test_vitals_processed_correctly(vit_proc, config_dic=DEFAULT_CONFIG)
+
 
     """
-    Step 1: Subset the set of transfers to the already processed cohort.
+    Step 1: Subset the set of transfers/admissions_core to the already processed cohort.
+
+    We do this by merging. 
     """
 
     transfers_S1 = (transfers_core
