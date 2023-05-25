@@ -25,7 +25,6 @@ import numpy as np
 from tqdm import tqdm
 tqdm.pandas()
 
-import src.data_processing.MIMIC.data_utils as utils
 import src.data_processing.MIMIC.test_functions as tests
 
 # LOAD CONFIGURATION 
@@ -90,7 +89,6 @@ def _select_outcome(vitals, transfers, window):
 
 
 def main():
-
     # ------------------------ Checking Data Loaded -------------------------------
     try:
         assert os.path.exists(DEFAULT_CONFIG["SAVE_FD"] + "admissions_intermediate.csv")
@@ -104,6 +102,11 @@ def main():
     """
     Data Loading
     """
+
+    # Print Information
+    print("\n\n ======== PROCESSING OUTCOMES ======== \n\n")
+
+    # Load data
     admissions = pd.read_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_intermediate.csv",
                              index_col=0, header=0, 
                              parse_dates=["intime", "outtime", "intime_next", "outtime_next", "deathtime"])
@@ -135,7 +138,7 @@ def main():
     We consider 3 time windows (4, 12 and 24 hours).
     """
 
-    vitals["chartmax"] = vitals["outtime"] - vitals["time_to_end"]
+    # vitals["chartmax"] = vitals["outtime"] - vitals["time_to_end"]
     vitals["hadm_id"] = admissions.set_index("stay_id").loc[vitals.stay_id.values, "hadm_id"].values
 
     # Define time windows

@@ -105,6 +105,9 @@ def main():
     - triage_ed: from ed/triage.csv filepath. This is a dataframe of patient ED admission indicating triage assessments.
     """
 
+    # Print Information
+    print("\n\n ======= PROCESSING ADMISSIONS ======= \n\n")
+
     # Hospital Core
     patients_core = pd.read_csv(DEFAULT_CONFIG["DATA_FD"] + "core/patients.csv",
                                 index_col=None, header=0, low_memory=False)

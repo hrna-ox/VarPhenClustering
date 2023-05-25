@@ -18,7 +18,7 @@
       "gate_nodes": 20,
       "feat_extr_layers": 2,
       "feat_extr_nodes": 20,
-      "num_clus": 2
+      "num_clus": 6
    },
   "training_config": {
       "lr": 0.001,

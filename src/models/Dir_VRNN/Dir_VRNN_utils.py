@@ -16,6 +16,28 @@ import os
 
 # ============= Auxiliary Functions =============
 
+def sample_normal(means, logvars):
+    """
+    How to sample from a Normal distribution given a set of cluster means and logvars so that it is back-propagable.
+
+    Inputs:
+        - means: vector of shape (K, _dim) corresponding to cluster means
+        - logvars: vector of shape (K, ) corresponding to cluster log of variances
+
+    Outputs:
+        - samples from normal distributions of shape (K, )
+    """
+    K, _dim = means.shape
+
+    # Generate samples form standard normal distribution
+    eps = torch.randn(size=[K, _dim], device=means.device)
+
+    # Apply normal reparameterisation trick
+    samples = means + torch.reshape(torch.exp(0.5 * logvars), [-1, 1]) * eps
+
+    return samples
+
+
 def sample_dirichlet(alpha):
     """
     How to sample from a dirichlet distribution with parameter alpha so that it is back-propagable.
@@ -35,7 +57,7 @@ def sample_dirichlet(alpha):
     X = _sample_differentiable_gamma_dist(alphas)
 
     # Compute sum across rows
-    X_sum = torch.sum(X, dim=0, keepdim=True)
+    X_sum = torch.sum(X, dim=1, keepdim=True)
 
     # Generate Dirichlet samples by normalising
     dirichlet_samples = torch.divide(X, X_sum + 1e-8)

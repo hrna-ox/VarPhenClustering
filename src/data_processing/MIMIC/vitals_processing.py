@@ -9,11 +9,11 @@ Requirements:
 
 This files processes MIMIC-IV-ED vital data. The following steps are performed:
 
-	- Subset patients based on the cohort previously processed under admissions_processing.py
-	- Subset vital sign measurements taken between intime and outtime of ED admissions.
-	- Remove patients based on availability of temporal information.
-	- Resample measurements to hourly basis (averaged).
-	- Remove patients based on availability of temporal information on the newly sampled data.
+    - Subset patients based on the cohort previously processed under admissions_processing.py
+    - Subset vital sign measurements taken between intime and outtime of ED admissions.
+    - Remove patients based on availability of temporal information.
+    - Resample measurements to hourly basis (averaged).
+    - Remove patients based on availability of temporal information on the newly sampled data.
 """
 
 # Import Libraries
@@ -102,8 +102,8 @@ def _resample(x, time_feats, resampling_rule, resampling_col):
 	# Now add all other vars
 	static_vars = [col for col in x.columns if col not in time_feats + [resampling_col]]
 	pat_static_info = x[static_vars].iloc[0, :]
-
-	# Add to resampled data
+        
+    # Add to resampled data
 	resampled_x[static_vars] = pat_static_info
 
 	return resampled_x
@@ -309,4 +309,4 @@ def main():
 	print("=====", end="\r")
 
 if __name__ == "__main__":
-	main()
+    main()
