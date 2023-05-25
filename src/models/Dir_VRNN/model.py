@@ -2,7 +2,7 @@
 Author: Henrique Aguiar
 Contact: henrique.aguiar@eng.ox.ac.uk
 
-Main model file for proposed model for Dirichlet Variational Recurrent Neural Network method.
+Model file to define GC-DaPh class.
 """
 
 # ============= IMPORT LIBRARIES ==============
