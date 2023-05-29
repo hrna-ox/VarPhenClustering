@@ -11,6 +11,7 @@ Requirements:
 This files processes MIMIC-IV-ED outcome data for each admission. The following steps are performed:
 
 	- Subset patients based on the cohort previously processed for admissions and vitals.
+    - Extra processing to remove nonsensical admissions, e.g., admitted to hospital before ED, etc...
 	- Identify windows of time after the admission to target the outcomes.
 	- Compute targets based on a) death, b) ICU, c) Discharge, or d) any medical Ward.
 """
@@ -154,27 +155,30 @@ def main():
     We do this by merging. 
     """
     merge_ids = ["subject_id", "hadm_id"]
+    info_ids = merge_ids + ["stay_id", "intime", "outtime", "intime_next", "outtime_next"]
 
     # Inner merge for transfers core
     transfers_S1 = (
         transfers_core
         .merge(
-            vit_proc[merge_ids + ["stay_id"]].drop_duplicates(),   # Drop duplicates as we don't need all the rows
+            vit_proc[info_ids].drop_duplicates(),   # Drop duplicates as we don't need all the rows
             how="inner",
             on=merge_ids
         )
         .dropna(subset=["hadm_id"])                 # Drop rows with no hadm_id as we can't compare with transfers
+        .sort_values(by=["subject_id", "stay_id"], ascending=True) # Sort by subject_id and stay_id
     )
 
     # Inner merge for admissions core
     admissions_S1 = (
         admissions_core
         .merge(
-            vit_proc[merge_ids + ["stay_id"]].drop_duplicates(),
+            vit_proc[info_ids].drop_duplicates(),
             how="inner",
             on=merge_ids
         )
         .dropna(subset=["hadm_id"])            # Drop rows with no hadm_id as we can't compare with transfers
+        .sort_values(by=["subject_id", "stay_id"], ascending=True) # Sort by subject_id and stay_id
     )
 
     # Testing and save
@@ -185,6 +189,24 @@ def main():
 
     # Check processing and correctdeness
     transfers_S1.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "transfers_S1.csv", header=True, index=True)
+
+
+    """
+    Step 2: 
+        Remove nonsensical admissions, i.e.:
+        a) Admissions were admitted to hospital prior to ED entrance.
+        b)
+    """
+
+    admissions_S2 = (
+        admissions_S1
+        .query("intime <= admittime")                            # admissions to hospital after ED admissions
+        .query("intime_next >= admittime | intime_next.isna()")  # admissions to hospital before next ED transfer
+        .query("outtime <= edouttime")                           # transfer outtime before ed exit time
+        .query("intime <= edregtime")                            # transfer intmie before ed registration time
+        .query("dischtime >= outtime_next")                      # discharge after next transfer
+        .query("")
+    )
 
     """
     Step 2: Identify outcome given the transfer information.
