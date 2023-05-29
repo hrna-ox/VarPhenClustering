@@ -207,7 +207,7 @@ def main():
 	
 	# Test processing and save
 	tests.test_charttime_between_intime_outtime(vitals_S1)
-	tests.test_ids_subset_of_cohort(vitals_S1, adm_inter)
+	tests.test_ids_subset_of_cohort(vitals_S1, adm_inter, "subject_id", "stay_id")
 
 	vitals_S1.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_S1.csv", index=True, header=True)
 	print("=", end="\r")

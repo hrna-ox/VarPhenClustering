@@ -12,6 +12,7 @@ MISSING TYPE HINTING.
 
 # Import libraries and functions
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
 
 tqdm.pandas()
@@ -144,10 +145,10 @@ def test_is_unique_ids(df: pd.DataFrame, *args):
 
         output = output and not has_repeated
 
-    assert output
+        assert output
 
-    # Output message
-    print("Test passed!")
+        # Output message
+        print(f"Test passed for variable  {arg}!")
 
 def test_is_complete_ids(df: pd.DataFrame, *args):
     """Check no missing values across id columns"""
@@ -164,7 +165,10 @@ def test_is_complete_ids(df: pd.DataFrame, *args):
 
         output = output and not has_missing
 
-    assert output
+        assert output
+
+        # Output message
+        print(f"Test passed for variable {arg}!")
 
 def test_admissions_processed_correctly(df: pd.DataFrame):
     """
@@ -214,17 +218,16 @@ def test_charttime_between_intime_outtime(df):
     # Output message
     print("Test passed!")
 
-def test_ids_subset_of_cohort(cur_df, cohort_df):
-    "Check whether stay id and subject id are subset of cohort data."
+def test_ids_subset_of_cohort(cur_df, cohort_df, *args):
+    "Check whether new df rows (args) are subset of cohort data."
 
     # Print info about test function
-    print("\nTesting stay id and subject id are subset of cohort data.")
+    print(f"\nTesting {args} are subset of cohort data.")
 
-    cond1 = cur_df["subject_id"].isin(cohort_df["subject_id"]).all()
-    cond2 = cur_df["stay_id"].isin(cohort_df["stay_id"]).all()
-
-    assert cond1 
-    assert cond2
+    # Iterate over args
+    for arg in args:
+        cond = cur_df[arg].isin(cohort_df[arg]).all()
+        assert cond
 
     # Output message
     print("Test passed!")
@@ -413,4 +416,3 @@ def test_vitals_processed_correctly(df: pd.DataFrame, config_dic: dict):
 
 
 # ========== OUTCOME TESTING ===========
-

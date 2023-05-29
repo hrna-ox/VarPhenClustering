@@ -128,6 +128,10 @@ def main():
         .assign(sampled_time_to_end=lambda x: pd.to_timedelta(x["sampled_time_to_end"]))  # pd does not load timedelta automatically
     )
 
+    # Check correct computation of admissions and vitals
+    tests.test_admissions_processed_correctly(adm_proc)
+    tests.test_vitals_processed_correctly(vit_proc, config_dic=DEFAULT_CONFIG)
+
 
     # Load core info
     transfers_core = pd.read_csv(
@@ -143,20 +147,41 @@ def main():
         parse_dates=["admittime", "dischtime", "deathtime", "edregtime", "edouttime"]
     )
 
-    # Check correct computation of admissions and vitals
-    tests.test_admissions_processed_correctly(adm_proc)
-    tests.test_vitals_processed_correctly(vit_proc, config_dic=DEFAULT_CONFIG)
-
 
     """
     Step 1: Subset the set of transfers/admissions_core to the already processed cohort.
 
     We do this by merging. 
     """
+    merge_ids = ["subject_id", "hadm_id"]
 
-    transfers_S1 = (transfers_core
-                    .query("subject_id in @vitals.subject_id.values & hadm_id in @vitals.hadm_id.values")
+    # Inner merge for transfers core
+    transfers_S1 = (
+        transfers_core
+        .merge(
+            vit_proc[merge_ids + ["stay_id"]].drop_duplicates(),   # Drop duplicates as we don't need all the rows
+            how="inner",
+            on=merge_ids
+        )
+        .dropna(subset=["hadm_id"])                 # Drop rows with no hadm_id as we can't compare with transfers
     )
+
+    # Inner merge for admissions core
+    admissions_S1 = (
+        admissions_core
+        .merge(
+            vit_proc[merge_ids + ["stay_id"]].drop_duplicates(),
+            how="inner",
+            on=merge_ids
+        )
+        .dropna(subset=["hadm_id"])            # Drop rows with no hadm_id as we can't compare with transfers
+    )
+
+    # Testing and save
+    tests.test_ids_subset_of_cohort(transfers_S1, vit_proc, *merge_ids)
+    tests.test_ids_subset_of_cohort(admissions_S1, vit_proc, *merge_ids)
+    tests.test_is_complete_ids(transfers_S1, *merge_ids, "stay_id")
+    tests.test_is_complete_ids(admissions_S1, *merge_ids, "stay_id")
 
     # Check processing and correctdeness
     transfers_S1.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "transfers_S1.csv", header=True, index=True)
@@ -165,9 +190,6 @@ def main():
     Step 2: Identify outcome given the transfer information.
     We consider 3 time windows (4, 12 and 24 hours).
     """
-
-    # vitals["chartmax"] = vitals["outtime"] - vitals["time_to_end"]
-    vitals["hadm_id"] = admissions.set_index("stay_id").loc[vitals.stay_id.values, "hadm_id"].values
 
     # Define time windows
     _4_hours = dt.timedelta(hours=4)
