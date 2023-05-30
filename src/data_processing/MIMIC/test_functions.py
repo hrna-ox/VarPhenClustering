@@ -438,4 +438,3 @@ def test_deathtimes_match(df: pd.DataFrame):
 
     # Output message
     print("Test passed!")
-

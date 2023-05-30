@@ -39,56 +39,6 @@ if not os.path.exists(DEFAULT_CONFIG["SAVE_FD"]):
 
 # ========== AUXILIARY FUNCTIONS ==========
 
-def _select_outcome(vitals, transfers, window):
-    """
-    Determine outcome of admission given dataset with vital and static information, 
-    and data for transfers.
-    output order is [D, I, W, Disc].
-    """
-
-    # Load static information from vitals
-    try:
-        ed_outtime, dod = vitals[["outtime", "deathtime"]].iloc[0, :]
-    except IndexError:
-        ed_outtime, dod = vitals[["outtime", "deathtime"]].iloc[:]
-    
-
-    # Check deathtime first
-    if dod != np.nan:
-        
-        # Get time to death
-        time_to_death = dod - ed_outtime
-        if time_to_death <= window:
-            return [1, 0, 0, 0]       
-        
-    # If there is no death, or patient died after time window
-    lower_bound, upper_bound = ed_outtime, ed_outtime + window
-    transfers_within_window = (
-        transfers
-        .query("intime >= @lower_bound")
-        .query("intime <= @upper_bound")
-    )
-    
-    # Identify ICUs
-    has_icus = (
-        transfers_within_window.careunit.str.contains("(?i)ICU", na=False) |
-        transfers_within_window.careunit.str.contains("(?i)Neuro Stepdown", na=False)
-    )
-
-    # If ICU admission
-    if has_icus.sum() > 0:
-        return [0, 1, 0, 0]
-    
-    # Check to see transfers contain discharge
-    has_discharge = transfers_within_window.eventtype.str.contains("discharge", na=False)
-    if has_discharge.sum() > 0:
-        return [0, 0, 0, 1]
-    
-    else:
-        return [0, 0, 1, 0]
-
-
-
 
 def main():
     # ------------------------ Checking Data Loaded -------------------------------
@@ -157,14 +107,14 @@ def main():
     """
 
     # Define Id for merging. We separate deathtime as one database registers only date, while the other
-    # registers everyting (i.e. up to second)
+    # registers everything (i.e. up to second)
     hadm_merge_ids = [
         col for
         col in vit_proc.columns.tolist() if
         col in admissions_core.columns.tolist() and
         "death" not in col
     ]
-    merge_ids = ["subject_id", "hadm_id", "stay_id"]         # Useful simplication
+    merge_ids = ["subject_id", "hadm_id", "stay_id"]         # Useful simplification
 
     # Inner merge for admissions core
     admissions_S1 = (
@@ -172,24 +122,28 @@ def main():
         .merge(
             vit_proc.drop_duplicates(subset=merge_ids), # only want one obvs per admission for merging
             how="inner",
-            on=hadm_merge_ids
+            on=hadm_merge_ids,
+            suffixes=("", "_ed")
         )
         .dropna(subset=["hadm_id"])            # Drop rows with no hadm_id as we can't compare with transfers
-        .sort_values(by=merge_ids, ascending=True) # Sort by subject_id and stay_id
+        .sort_values(by=merge_ids, ascending=True) # Sort by merge_ids, in order
     )
 
     # Testing 
     tests.test_ids_subset_of_cohort(transfers_S1, vit_proc, *merge_ids)
     tests.test_ids_subset_of_cohort(admissions_S1, vit_proc, *merge_ids)
-    tests.test_is_complete_ids(transfers_S1, *merge_ids, "stay_id")
-    tests.test_is_complete_ids(admissions_S1, *merge_ids, "stay_id")
+    tests.test_is_complete_ids(transfers_S1, *merge_ids)
+    tests.test_is_complete_ids(admissions_S1, *merge_ids)
 
 
     """
     Step 2: 
         Remove nonsensical admissions, i.e.:
         a) Admissions were admitted to hospital prior to ED entrance.
-        b) Admissions 
+        b) Next transfer intime is after admission time to hospital (or is missing).
+        c) ED outtime is before ED register outtime.
+        d) ED intime is prior to ED register intime.
+        e) Discharge from hospital is after next transfer outtime (or is missing), allowing for some delay (6 hours).
     """
 
     admissions_S2 = (
@@ -197,12 +151,65 @@ def main():
         .query("intime <= admittime")                            # admissions to hospital after ED admissions
         .query("intime_next >= admittime | intime_next.isna()")  # admissions to hospital before next ED transfer
         .query("outtime <= edouttime")                           # transfer outtime before ed exit time
-        .query("intime <= edregtime")                            # transfer intmie before ed registration time
-        .query("dischtime >= outtime_next")                      # discharge after next transfer
+        .query("intime <= edregtime")                            # transfer intime before ed registration time
         .query("dischtime - outtime_next >= @pd.Timedelta('-6h') | outtime_next.isna()")
         # discharge time not earlier than outtime_next (added -6 hours due to some potential delays)
     )
 
+    # Testing 
+    tests.test_deathtime_match(admissions_S2)
+    tests.test_is_unique_ids(admissions_S2, *merge_ids)
+
+
+    """
+    Step 3: 
+        Identify outcome given the transfer information.
+    """
+
+    # First subset Transfers
+    transfers_S1 = (
+        transfers_core
+        .merge(
+            admissions_S2[merge_ids],
+            how="inner",
+            on=["subject_id", "hadm_id"],           # transfers does not have stay id column
+        )
+        .sort_values(by=merge_ids, ascending=True) # Sort by subject_id, hadm_id and stay_id
+    )
+
+    # test = (
+    #     admissions_S2
+    #     .groupby("stay_id", as_index=True)
+    #     .
+    # )
+
+
+    # Define time windows
+    _4_hours = dt.timedelta(hours=4)
+    _12_hours = dt.timedelta(hours=12)
+    _24_hours = dt.timedelta(hours=24)
+
+    # Define output outcome arrays
+    list_of_hadm = vitals["hadm_id"].dropna().unique()
+    out_4h = pd.DataFrame(np.nan, list_of_hadm, columns=["De", "I", "W", "Di"])
+    out_12h = pd.DataFrame(np.nan, list_of_hadm, columns=["De", "I", "W", "Di"])
+    out_24h = pd.DataFrame(np.nan, list_of_hadm, columns=["De", "I", "W", "Di"])
+
+    # Apply outcome identification function for each patient
+    for cur_hadm in tqdm(list_of_hadm):
+
+        # Get vitals and transfer info for patient
+        cur_vital, cur_tr = vitals.query("hadm_id==@cur_hadm"), transfers_S1.query("hadm_id==@cur_hadm")
+
+        # Determine outcome
+        out_4h.loc[cur_hadm, :] = _select_outcome(vitals=cur_vital, transfers=cur_tr, window=_4_hours)
+        out_12h.loc[cur_hadm, :] = _select_outcome(vitals=cur_vital, transfers=cur_tr, window=_12_hours)
+        out_24h.loc[cur_hadm, :] = _select_outcome(vitals=cur_vital, transfers=cur_tr, window=_24_hours)
+
+    # Quick checks (to be moved to test data)
+    assert out_4h.sum(axis=1).eq(1).all()
+    assert out_12h.sum(axis=1).eq(1).all()
+    assert out_24h.sum(axis=1).eq(1).all()
 
     ################## 
     tr_merge_ids = [
@@ -223,42 +230,6 @@ def main():
         .sort_values(by=merge_ids, ascending=True) # Sort by subject_id and stay_id
     )
     ########################
-
-    # Testing 
-    tests.test_deathtimes_match(admissions_S1)
-
-
-    """
-    Step 2: Identify outcome given the transfer information.
-    We consider 3 time windows (4, 12 and 24 hours).
-    """
-
-    # Define time windows
-    _4_hours = dt.timedelta(hours=4)
-    _12_hours = dt.timedelta(hours=12)
-    _24_hours = dt.timedelta(hours=24)
-
-    # Define output outcome arrays
-    list_of_hadms = vitals["hadm_id"].dropna().unique()
-    out_4h = pd.DataFrame(np.nan, list_of_hadms, columns=["De", "I", "W", "Di"])
-    out_12h = pd.DataFrame(np.nan, list_of_hadms, columns=["De", "I", "W", "Di"])
-    out_24h = pd.DataFrame(np.nan, list_of_hadms, columns=["De", "I", "W", "Di"])
-
-    # Apply outcome identification function for each patient
-    for cur_hadm in tqdm(list_of_hadms):
-
-        # Get vitals and transfer info for patient
-        cur_vital, cur_tr = vitals.query("hadm_id==@cur_hadm"), transfers_S1.query("hadm_id==@cur_hadm")
-
-        # Determine outcome
-        out_4h.loc[cur_hadm, :] = _select_outcome(vitals=cur_vital, transfers=cur_tr, window=_4_hours)
-        out_12h.loc[cur_hadm, :] = _select_outcome(vitals=cur_vital, transfers=cur_tr, window=_12_hours)
-        out_24h.loc[cur_hadm, :] = _select_outcome(vitals=cur_vital, transfers=cur_tr, window=_24_hours)
-
-    # Quick checks (to be moved to test data)
-    assert out_4h.sum(axis=1).eq(1).all()
-    assert out_12h.sum(axis=1).eq(1).all()
-    assert out_24h.sum(axis=1).eq(1).all()
 
     """
     Final Step:
