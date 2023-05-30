@@ -218,8 +218,7 @@ def main():
 	b) at least NA_PROP_THRESH * # observations NAs on any vital sign
 	"""
 
-	vitals_S2 = _time_series_removal_criteria(vitals_S1, 
-					   						dic_params=DEFAULT_CONFIG)
+	vitals_S2 = _time_series_removal_criteria(vitals_S1, dic_params=DEFAULT_CONFIG)
 
 	# Test and save
 	tests.test_stays_have_sufficient_data(vitals_S2, DEFAULT_CONFIG)
@@ -242,11 +241,11 @@ def main():
 		.sort_values(by=["stay_id", "time_to_end"], ascending=[True, False])
 		.groupby("stay_id", as_index=False)
 		.progress_apply(lambda x: 
-		  			_resample(x, 
-						time_feats = feats_to_check,
-						resampling_rule = resampling_rule,
-						resampling_col="time_to_end")
-					)
+			_resample(x, 
+			time_feats = feats_to_check,
+			resampling_rule = resampling_rule,
+			resampling_col="time_to_end")
+		)
 		.reset_index(drop=True)
 		.assign(charttime_ub=lambda x: x["outtime"] - x["sampled_time_to_end"])     # Define upper bound on charttime by substracting from outtime.
 	)
@@ -264,8 +263,7 @@ def main():
 	Step 4: Apply step 2 with the blocked data
 	"""
 
-	vitals_S4 = _time_series_removal_criteria(vitals_S3, 
-					   						dic_params=DEFAULT_CONFIG)
+	vitals_S4 = _time_series_removal_criteria(vitals_S3, dic_params=DEFAULT_CONFIG)
 
 	# Test and save
 	tests.test_stays_have_sufficient_data(vitals_S4, DEFAULT_CONFIG)
@@ -303,7 +301,7 @@ def main():
 
 
 	# Testing vital information satisfies above criteria
-	tests.test_vitals_processed_correctly(vitals_S5)
+	tests.test_vitals_processed_correctly(vitals_S5, config_dic=DEFAULT_CONFIG)
 
 	vitals_S5.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_intermediate.csv", index=True, header=True)
 	print("=====", end="\r")

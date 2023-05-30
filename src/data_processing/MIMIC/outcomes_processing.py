@@ -63,9 +63,10 @@ def _select_outcome(vitals, transfers, window):
         
     # If there is no death, or patient died after time window
     lower_bound, upper_bound = ed_outtime, ed_outtime + window
-    transfers_within_window = (transfers
-                               .query("intime >= @lower_bound")
-                               .query("intime <= @upper_bound")
+    transfers_within_window = (
+        transfers
+        .query("intime >= @lower_bound")
+        .query("intime <= @upper_bound")
     )
     
     # Identify ICUs
@@ -154,48 +155,41 @@ def main():
 
     We do this by merging. 
     """
-    merge_ids = ["subject_id", "hadm_id"]
-    info_ids = merge_ids + ["stay_id", "intime", "outtime", "intime_next", "outtime_next"]
 
-    # Inner merge for transfers core
-    transfers_S1 = (
-        transfers_core
-        .merge(
-            vit_proc[info_ids].drop_duplicates(),   # Drop duplicates as we don't need all the rows
-            how="inner",
-            on=merge_ids
-        )
-        .dropna(subset=["hadm_id"])                 # Drop rows with no hadm_id as we can't compare with transfers
-        .sort_values(by=["subject_id", "stay_id"], ascending=True) # Sort by subject_id and stay_id
-    )
+    # Define Id for merging. We separate deathtime as one database registers only date, while the other
+    # registers everyting (i.e. up to second)
+    hadm_merge_ids = [
+        col for
+        col in vit_proc.columns.tolist() if
+        col in admissions_core.columns.tolist() and
+        "death" not in col
+    ]
+    merge_ids = ["subject_id", "hadm_id", "stay_id"]         # Useful simplication
 
     # Inner merge for admissions core
     admissions_S1 = (
         admissions_core
         .merge(
-            vit_proc[info_ids].drop_duplicates(),
+            vit_proc.drop_duplicates(subset=merge_ids), # only want one obvs per admission for merging
             how="inner",
-            on=merge_ids
+            on=hadm_merge_ids
         )
         .dropna(subset=["hadm_id"])            # Drop rows with no hadm_id as we can't compare with transfers
-        .sort_values(by=["subject_id", "stay_id"], ascending=True) # Sort by subject_id and stay_id
+        .sort_values(by=merge_ids, ascending=True) # Sort by subject_id and stay_id
     )
 
-    # Testing and save
+    # Testing 
     tests.test_ids_subset_of_cohort(transfers_S1, vit_proc, *merge_ids)
     tests.test_ids_subset_of_cohort(admissions_S1, vit_proc, *merge_ids)
     tests.test_is_complete_ids(transfers_S1, *merge_ids, "stay_id")
     tests.test_is_complete_ids(admissions_S1, *merge_ids, "stay_id")
-
-    # Check processing and correctdeness
-    transfers_S1.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "transfers_S1.csv", header=True, index=True)
 
 
     """
     Step 2: 
         Remove nonsensical admissions, i.e.:
         a) Admissions were admitted to hospital prior to ED entrance.
-        b)
+        b) Admissions 
     """
 
     admissions_S2 = (
@@ -205,8 +199,34 @@ def main():
         .query("outtime <= edouttime")                           # transfer outtime before ed exit time
         .query("intime <= edregtime")                            # transfer intmie before ed registration time
         .query("dischtime >= outtime_next")                      # discharge after next transfer
-        .query("")
+        .query("dischtime - outtime_next >= @pd.Timedelta('-6h') | outtime_next.isna()")
+        # discharge time not earlier than outtime_next (added -6 hours due to some potential delays)
     )
+
+
+    ################## 
+    tr_merge_ids = [
+        col for 
+        col in vit_proc.columns.tolist() if
+        col in transfers_core.columns.tolist() and
+        "death" not in col
+    ]
+    # Inner merge for transfers core
+    transfers_S1 = (
+        transfers_core
+        .merge(
+            vit_proc.drop_duplicates(subset=merge_ids),   # Drop duplicates as we don't need all the rows
+            how="inner",
+            on=tr_merge_ids
+        )
+        .dropna(subset=["hadm_id"])                 # Drop rows with no hadm_id as we can't compare with transfers
+        .sort_values(by=merge_ids, ascending=True) # Sort by subject_id and stay_id
+    )
+    ########################
+
+    # Testing 
+    tests.test_deathtimes_match(admissions_S1)
+
 
     """
     Step 2: Identify outcome given the transfer information.

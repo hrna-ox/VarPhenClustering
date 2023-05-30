@@ -256,9 +256,9 @@ def test_stays_have_sufficient_data(df, info_dic):
         df
         .groupby("stay_id")            # Group by stay id
         .apply(lambda x:
-               x[feats].isna().sum(axis=0) 
-               / 
-               x.shape[0]
+            x[feats].isna().sum(axis=0) 
+            / 
+            x.shape[0]
         )                           # Compute proportion of missing values per feature
         .le(max_na_prop)           # Check if proportion of missing values is less than max_na_prop
         .all(axis=1)               # Assert all feats satisfy condition per patient
@@ -416,3 +416,26 @@ def test_vitals_processed_correctly(df: pd.DataFrame, config_dic: dict):
 
 
 # ========== OUTCOME TESTING ===========
+
+def test_deathtimes_match(df: pd.DataFrame):
+    """
+    Check deathtime columns make sense. 'deathtime', derived from hospital data, is precise to the second, 
+    while 'deathtime_ed', derived from ED data, indicates only the day. We check if they match (when available),
+    i.e. they match up to the day
+
+    Args:
+        df (pd.DataFrame): dataframe of cohort admissions.
+    """
+
+    # Print Message
+    print("\nTesting whether deathtime dates match when available.")
+
+    assert (
+        df.deathtime.dt.date.eq(df.deathtime_ed.dt.date) |  
+        df["deathtime"].isna() |
+        df["deathtime_ed"].isna()
+    ).all()
+
+    # Output message
+    print("Test passed!")
+
