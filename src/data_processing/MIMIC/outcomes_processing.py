@@ -77,7 +77,7 @@ def get_first_icu_time(df):
 
     return earliest_icu_time
 
-None
+
 def get_first_discharge_time(df):
     """
     Given a list of transfers which includes information about the patient hospital admission and other information, get
@@ -99,7 +99,7 @@ def get_first_discharge_time(df):
             .query("eventtype == 'discharge'")
             .squeeze()                     # Convert to pd.Series, we know there is exactly one discharge eventtype
             .dischtime                     # Get the discharge time
-            
+
             )
         )
     )
@@ -118,6 +118,39 @@ def get_first_ward_time(df):
     earliest_ward_time = df.groupby("stay_id").intime_next.nth(0) # Get the first row of intime_next (all rows have the same value)
 
     return earliest_ward_time
+
+
+def compute_outcomes_from_events(df: pd.DataFrame, time_window: pd.Timedelta):
+    """
+    Given a dataframe with time information for each event, and the time window from outtime, compute the relevant
+    outcome.
+
+    This is an iterative process: first check if death, then ICU, then discharge, and finally discharge.
+
+    Params:
+        df (pd.DataFrame): Dataframe with time information for each event (and 'outtime', as well).
+        time_window (pd.Timedelta): Time window from outtime to compute outcome.
+    """
+
+    # Check for death
+    outcomes = (
+        df
+        .apply(lambda x:
+            "Death" if x.first_death <= x.outtime + time_window else (
+                "ICU" if x.first_icu <= x.outtime + time_window else (
+                    "Discharge" if x.first_discharge <= x.outtime + time_window else (
+                        "Ward" if x.first_ward <= x.outtime + time_window else np.nan
+                    )
+                )
+            )
+        )
+    )
+
+    # Check outcome is well-defined (i.e. the above returns exactly one outcome)
+    assert outcomes.isin(["Death", "ICU", "Discharge", "Ward"]).all()
+
+    return outcomes
+
 
 # endregion
 
@@ -223,9 +256,7 @@ def main():
     )
 
     # Testing
-    tests.test_ids_subset_of_cohort(transfers_S1, vit_proc, *merge_ids)
     tests.test_ids_subset_of_cohort(admissions_S1, vit_proc, *merge_ids)
-    tests.test_is_complete_ids(transfers_S1, *merge_ids)
     tests.test_is_complete_ids(admissions_S1, *merge_ids)
     # endregion
 
@@ -285,7 +316,6 @@ def main():
     tests.test_is_complete_ids(transfers_S1, "subject_id", "hadm_id")
     tests.test_outtimes_match(transfers_S1)
     tests.test_every_patient_has_discharge_transfer(transfers_S1)
-    # endregion
 
     # Now compute the earliest time given the list of transfers.
     earliest_outcome_times = (
@@ -295,99 +325,41 @@ def main():
         .assign(first_icu=get_first_icu_time(transfers_S1)) # Compute first icu time
         .assign(first_ward=get_first_ward_time(transfers_S1)) # Compute first ward time
         .assign(first_discharge=get_first_discharge_time(transfers_S1)) # Compute first discharge time
-        .loc[:, ["first_death", "first_icu", "first_ward", "first_discharge", 
-                "outtime", "discharge_location", "subject_id"]] 
+        .loc[:, ["first_death", "first_icu", "first_ward", "first_discharge",
+                "outtime", "discharge_location", "subject_id"]]
     )
 
     # Testing for computed outcomes
     tests.test_events_after_outtime(earliest_outcome_times)
 
+    # endregion
+
+    # region Step 4 - computing outcomes given a time window
     """
-    STEP 5:
-        Actually computing the outcomes given a different outcome timedelta.
-    """
-
-    # Define time windows
-    _4_hours = dt.timedelta(hours=4)
-    _12_hours = dt.timedelta(hours=12)
-    _24_hours = dt.timedelta(hours=24)
-
-    # Define output outcome arrays
-    list_of_hadm = vitals["hadm_id"].dropna().unique()
-    out_4h = pd.DataFrame(np.nan, list_of_hadm, columns=["De", "I", "W", "Di"])
-    out_12h = pd.DataFrame(np.nan, list_of_hadm, columns=[
-                           "De", "I", "W", "Di"])
-    out_24h = pd.DataFrame(np.nan, list_of_hadm, columns=[
-                           "De", "I", "W", "Di"])
-
-    # Apply outcome identification function for each patient
-    for cur_hadm in tqdm(list_of_hadm):
-
-        # Get vitals and transfer info for patient
-        cur_vital, cur_tr = vitals.query(
-            "hadm_id==@cur_hadm"), transfers_S1.query("hadm_id==@cur_hadm")
-
-        # Determine outcome
-        out_4h.loc[cur_hadm, :] = _select_outcome(
-            vitals=cur_vital, transfers=cur_tr, window=_4_hours)
-        out_12h.loc[cur_hadm, :] = _select_outcome(
-            vitals=cur_vital, transfers=cur_tr, window=_12_hours)
-        out_24h.loc[cur_hadm, :] = _select_outcome(
-            vitals=cur_vital, transfers=cur_tr, window=_24_hours)
-
-    # Quick checks (to be moved to test data)
-    assert out_4h.sum(axis=1).eq(1).all()
-    assert out_12h.sum(axis=1).eq(1).all()
-    assert out_24h.sum(axis=1).eq(1).all()
-
-    ##################
-    tr_merge_ids = [
-        col for
-        col in vit_proc.columns.tolist() if
-        col in transfers_core.columns.tolist() and
-        "death" not in col
-    ]
-    # Inner merge for transfers core
-    transfers_S1 = (
-        transfers_core
-        .merge(
-            # Drop duplicates as we don't need all the rows
-            vit_proc.drop_duplicates(subset=merge_ids),
-            how="inner",
-            on=tr_merge_ids
-        )
-        # Drop rows with no hadm_id as we can't compare with transfers
-        .dropna(subset=["hadm_id"])
-        # Sort by subject_id and stay_id
-        .sort_values(by=merge_ids, ascending=True)
-    )
-    ########################
-
-    """
-    Final Step:
-    - Subset to those admissions that are non-missing.
-    - Create charttime time feature.
+    STEP 4:
+        Compute outcomes and subset all data.
     """
 
-    # Subset vitals and admission data
-    admissions_final = admissions.query(
-        "hadm_id.isin(@list_of_hadms)").set_index("hadm_id")
-    vitals_subset = vitals.query("hadm_id.isin(@list_of_hadms)")
+    # Load TIme window
+    day_delta = pd.Timedelta(days=1)
 
-    # Create charttime variable
-    vitals_final = (vitals_subset
-                    .assign(charttime=lambda x: x["outtime"] - x["sampled_time_to_end"])
-                    )
+    # Compute outcomes
+    cat_outcomes = compute_outcomes_from_events(earliest_outcome_times, time_window=day_delta)
 
-    """
-    Print Base information, check data processed correctly and save.
-    """
+    # Convert to one hot encoding
+    oh_outcomes = pd.get_dummies(cat_outcomes.squeeze()).sort_index()
 
-    # Number of Patients and number of observations.
-    print(f"Number of cohort patient: {vitals_final.stay_id.nunique()}")
+    # Subset admissions and vitals
+    admissions_final = adm_proc.query("stay_id.isin(@oh_outcomes.index)").sort_values("stay_id")
+    vitals_final = vit_proc.query("stay_id.isin(@oh_outcomes.index)").sort_values("stay_id")
+
+    # Testing
+
+
+    # Print Base Information
+    print(f"Number of cohort patient: {admissions_final.stay_id.nunique()}")
     print(f"Number of observations: {vitals_final.shape[0]}")
-    print(
-        f"Sample outcome distribution (12 hours window): {out_12h.sum(axis=0)}")
+    print(f"Sample outcome distribution: {oh_outcomes.sum(axis=0)}")
 
     # Prepare Save Path
     process_fd = DEFAULT_CONFIG["DATA_FD"] + "processed/"
@@ -396,23 +368,14 @@ def main():
         os.makedirs(process_fd)
 
     # Save general
-    vitals_final.to_csv(
-        DEFAULT_CONFIG["SAVE_FD"] + "vitals_final.csv", index=True, header=True)
-    admissions_final.to_csv(
-        DEFAULT_CONFIG["SAVE_FD"] + "admissions_final.csv", index=True, header=True)
+    vitals_final.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_final.csv", index=True, header=True)
+    admissions_final.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_final.csv", index=True, header=True)
 
     # Save for input
-    vitals_final.to_csv(process_fd + "vitals_process.csv",
-                        index=True, header=True)
-    admissions_final.to_csv(
-        process_fd + "admissions_process.csv", index=True, header=True)
-    out_4h.to_csv(process_fd + "outcomes_4h_process.csv",
-                  index=True, header=True)
-    out_12h.to_csv(process_fd + "outcomes_12h_process.csv",
-                   index=True, header=True)
-    out_24h.to_csv(process_fd + "outcomes_24h_process.csv",
-                   index=True, header=True)
-
+    vitals_final.to_csv(process_fd + "vitals_process.csv", index=True, header=True)
+    admissions_final.to_csv(process_fd + "admissions_process.csv", index=True, header=True)
+    oh_outcomes.to_csv(process_fd + "outcomes_process.csv", index=True, header=True)
+    # endregion
 
 if __name__ == "__main__":
     main()

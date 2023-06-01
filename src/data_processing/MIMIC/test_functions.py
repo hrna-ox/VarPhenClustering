@@ -511,8 +511,19 @@ def test_events_after_outtime(df: pd.DataFrame):
     # Print Message
     print("\nTesting whether events occur after ED outtime.")
 
-    # Check condition
-    assert df[["first_death", "first_icu", "first_ward", "first_discharge"]].ge(df["outtime"], axis=0).all().all()
+    def event_after_outtime(arg):
+        """
+        Check whether col *arg is after outtime.
+        """
 
-    # Output message
-    print("Test passed!")
+        assert (
+            df[arg].ge(df["outtime"]) |
+            df[arg].isna()
+        ).all()
+
+        # Output message
+        print(f"Test passed for feature {arg}!")
+
+    # Check condition
+    for _arg in ["first_death", "first_icu", "first_ward", "first_discharge"]:
+        event_after_outtime(_arg)
