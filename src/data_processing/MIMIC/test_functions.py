@@ -385,10 +385,10 @@ def test_vitals_processed_correctly(df: pd.DataFrame, config_dic: dict):
     Check vitals were processed correctly and make sense.
 
     - Check for completeness of identifiers (patient and time).
-    - Check for correctedness of next transfer information.
+    - Check for correctness of next transfer information.
     - Check sufficient temporal data.
     - Check last observation sufficiently close to outtime.
-    - Check for correctedness of resampling.
+    - Check for correctness of resampling.
     """
 
     # Print info about test function
@@ -417,7 +417,7 @@ def test_vitals_processed_correctly(df: pd.DataFrame, config_dic: dict):
 
 # ========== OUTCOME TESTING ===========
 
-def test_deathtimes_match(df: pd.DataFrame):
+def test_deathtime_match(df: pd.DataFrame):
     """
     Check deathtime columns make sense. 'deathtime', derived from hospital data, is precise to the second, 
     while 'deathtime_ed', derived from ED data, indicates only the day. We check if they match (when available),
@@ -435,6 +435,84 @@ def test_deathtimes_match(df: pd.DataFrame):
         df["deathtime"].isna() |
         df["deathtime_ed"].isna()
     ).all()
+
+    # Output message
+    print("Test passed!")
+
+
+def test_outtimes_match(df: pd.DataFrame):
+    """
+    Check 'outtime' and 'outtime_ed' times match when available. This is designed to test transfers df after merging
+    transfers_df and admissions_df.
+
+    To check this, we groupby patient and consequently check whether there is an outtime (i.e. a transfer) matching the 
+    ed outtime.
+
+    Args:
+        df (pd.DataFrame): pd.DataFrame with transfers data.
+    """
+
+    # Print Message
+    print("\nTesting whether outtimes match when available.")
+
+    # Check condition for each patient
+    assert (
+        df
+        .groupby("subject_id")
+        .progress_apply(lambda x: 
+            x["outtime"].eq(x["outtime_ed"]).sum() == 1
+        )
+        .all()
+    ) 
+
+    # Output message
+    print("Test passed!")
+
+
+def test_every_patient_has_discharge_transfer(df: pd.DataFrame):
+    """
+    Check whether every patient has a 'discharge' transfer which is also the last transfer.
+
+    We check two conditions:
+    - for each patient there is at least a discharge transfer.
+    - for each patient, the discharge transfer is the last one.
+    """
+
+    # Print Message
+    print("\nTesting whether every patient has exactly one 'discharge' transfer which is also the last transfer.")
+
+    # First sort
+    _df = df.sort_values(by=["subject_id", "intime"], ascending=True)
+
+    # Check condition for each patient
+    assert (
+        _df
+        .groupby("subject_id")
+        .filter(lambda x:                                                       # get admissions that satisfy conditions
+            x["eventtype"].str.contains("discharge", na=False, case=False).sum() != 1  # not having discharge admission
+            and                                                                # and                          
+            "discharge" not in x["eventtype"].iloc[-1].lower()                  # last admission not being discharge
+        )
+        .empty
+    )
+
+    # Output message
+    print("Test passed!")
+
+        
+def test_events_after_outtime(df: pd.DataFrame):
+    """
+    Check all events occur after ED outtime ("outtime")
+
+    Args:
+        df (pd.DataFrame): pd.DataFrame with transfers data.
+    """
+
+    # Print Message
+    print("\nTesting whether events occur after ED outtime.")
+
+    # Check condition
+    assert df[["first_death", "first_icu", "first_ward", "first_discharge"]].ge(df["outtime"], axis=0).all().all()
 
     # Output message
     print("Test passed!")
