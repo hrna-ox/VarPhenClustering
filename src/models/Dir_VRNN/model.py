@@ -9,7 +9,6 @@ Model file to define GC-DaPh class.
 import torch
 import torch.nn as nn
 
-from torch.nn import LSTM
 from src.models.model_utils import MLP
 import src.models.Dir_VRNN.Dir_VRNN_utils as utils
 
@@ -89,7 +88,12 @@ class BaseModel(nn.Module):
                              output_fn="softmax")
 
         # Define feature extractors - feature representations for input observation and latent variables
-        self.phi_x = 
+        self.phi_x = MLP(input_size=self.input_size,  # input is set of observations.
+                         output_size=self.latent_dim,  # output is extracted features.
+                         hidden_layers=self.feat_extr_layers,
+                         hidden_nodes=self.feat_extr_nodes,
+                         act_fn="relu",
+                         output_fn="tanh")
 
         self.phi_z = MLP(input_size=self.latent_dim,  # input is average representation vector.
                         output_size=self.latent_dim,  # output is extracted feature version of input.
