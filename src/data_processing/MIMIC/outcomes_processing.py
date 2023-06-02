@@ -42,7 +42,7 @@ if not os.path.exists(DEFAULT_CONFIG["SAVE_FD"]):
 def get_first_death_time(df):
     """
     Given a list of transfers which includes information about the patient hospital admission and other information, get
-    the time of death for the patient. This function exists for standardisation.
+    the time of death for the patient. This function exists for standardization.
     """
 
     # For each stay id (groupby), access the deathtime and compute the minimum if available
@@ -63,9 +63,8 @@ def get_first_icu_time(df):
         .groupby("stay_id")
         .progress_apply(lambda x: (
             x
-            .query("""
-                careunit.str.contains('(?i)ICU', na=False, case=False) \
-                careunit.str.contains('(?i)Neuro Stepdown', na=False, case=False)""")       # Identify those transfers to ICU/Neuro Stepdown Wards
+            .query("""careunit.str.contains('(?i)ICU', na=False, case=False) | \
+                    careunit.str.contains('(?i)Neuro Stepdown', na=False, case=False)""")   # Identify those transfers to ICU/Neuro Stepdown Wards
             .intime                        # Get the entry time
             .min()                        # Compute the minimum entry time
             )
@@ -105,7 +104,7 @@ def get_first_discharge_time(df):
 def get_first_ward_time(df):
     """
     Given a list of transfers which includes information about the patient hospital admission and other information, get
-    the time of the first transfer to a medical ward for the patient if it exists. This function exists for standardisation.
+    the time of the first transfer to a medical ward for the patient if it exists. This function exists for standardization.
 
     Args:
         df (pd.DataFrame): Dataframe with transfers information.
@@ -131,13 +130,14 @@ def compute_outcomes_from_events(df: pd.DataFrame, time_window: pd.Timedelta):
     outcomes = (
         df
         .apply(lambda x:
-            "Death" if x.first_death <= x.outtime + time_window else (
-                "ICU" if x.first_icu <= x.outtime + time_window else (
-                    "Discharge" if x.first_discharge <= x.outtime + time_window else (
-                        "Ward" if x.first_ward <= x.outtime + time_window else np.nan
+            "Death" if x.first_death <= x.outtime + time_window else (  # Check if death is within time window
+                "ICU" if x.first_icu <= x.outtime + time_window else (  # if not, check if icu is within time window
+                    "Discharge" if x.first_discharge <= x.outtime + time_window else ( # if not, check if discharge is within time window
+                        "Ward" # Else, patient is still in hospital
                     )
                 )
-            )
+            ),
+            axis=1
         )
     )
 
@@ -151,6 +151,7 @@ def compute_outcomes_from_events(df: pd.DataFrame, time_window: pd.Timedelta):
 
 
 def main():
+
     # region checking previous processing
     try:
         assert os.path.exists(
@@ -182,7 +183,7 @@ def main():
         index_col=0,
         header=0,
         parse_dates=["intime", "outtime",
-                     "intime_next", "outtime_next", "deathtime"]
+                    "intime_next", "outtime_next", "deathtime"]
     )
     vit_proc = (
         pd.read_csv(
@@ -212,7 +213,7 @@ def main():
         index_col=None,
         header=0,
         parse_dates=["admittime", "dischtime",
-                     "deathtime", "edregtime", "edouttime"]
+                    "deathtime", "edregtime", "edouttime"]
     )
     # endregion
 
@@ -340,26 +341,31 @@ def main():
         Compute outcomes and subset all data.
     """
 
+    # Load outcome window, in hours
+    hours_outcome_window = DEFAULT_CONFIG["OUTCOME_WINDOW"]
+
     # Load TIme window
-    day_delta = pd.Timedelta(days=1)
+    day_delta = pd.Timedelta(hours=hours_outcome_window)
 
     # Compute outcomes
     cat_outcomes = compute_outcomes_from_events(earliest_outcome_times, time_window=day_delta)
 
+
     # Convert to one hot encoding
-    oh_outcomes = pd.get_dummies(cat_outcomes.squeeze()).sort_index()
+    oh_outcomes = pd.get_dummies(cat_outcomes.squeeze()).sort_index().reset_index(drop=False)
 
     # Subset admissions and vitals
-    admissions_final = adm_proc.query("stay_id.isin(@oh_outcomes.index)").sort_values("stay_id")
-    vitals_final = vit_proc.query("stay_id.isin(@oh_outcomes.index)").sort_values("stay_id")
+    admissions_final = adm_proc.query("stay_id.isin(@oh_outcomes.stay_id)").sort_values("stay_id")
+    vitals_final = vit_proc.query("stay_id.isin(@oh_outcomes.stay_id)").sort_values("stay_id")
 
-    # Testing
+    # Run tests
+    tests.test_data_processed_correctly(admissions_final, vitals_final, oh_outcomes)
 
 
     # Print Base Information
     print(f"Number of cohort patient: {admissions_final.stay_id.nunique()}")
     print(f"Number of observations: {vitals_final.shape[0]}")
-    print(f"Sample outcome distribution: {oh_outcomes.sum(axis=0)}")
+    print(f"Sample outcome distribution: \n{oh_outcomes.sum(axis=0).iloc[1:]}")
 
     # Prepare Save Path
     process_fd = DEFAULT_CONFIG["DATA_FD"] + "processed/"
@@ -367,14 +373,10 @@ def main():
     if not os.path.exists(process_fd):
         os.makedirs(process_fd)
 
-    # Save general
-    vitals_final.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "vitals_final.csv", index=True, header=True)
-    admissions_final.to_csv(DEFAULT_CONFIG["SAVE_FD"] + "admissions_final.csv", index=True, header=True)
-
     # Save for input
-    vitals_final.to_csv(process_fd + "vitals_process.csv", index=True, header=True)
-    admissions_final.to_csv(process_fd + "admissions_process.csv", index=True, header=True)
-    oh_outcomes.to_csv(process_fd + "outcomes_process.csv", index=True, header=True)
+    vitals_final.to_csv(process_fd + "vitals_process.csv", index=False, header=True)
+    admissions_final.to_csv(process_fd + "admissions_process.csv", index=False, header=True)
+    oh_outcomes.to_csv(process_fd + f"outcomes_{hours_outcome_window}_process.csv", index=False, header=True)
     # endregion
 
 if __name__ == "__main__":

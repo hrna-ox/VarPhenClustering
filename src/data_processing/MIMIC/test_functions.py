@@ -527,3 +527,46 @@ def test_events_after_outtime(df: pd.DataFrame):
     # Check condition
     for _arg in ["first_death", "first_icu", "first_ward", "first_discharge"]:
         event_after_outtime(_arg)
+
+def test_data_processed_correctly(adm_df, vit_df, out_df):
+    """
+    Check whether the arrays we obtained make sense.
+
+    Params:
+    - adm_df: pd.DataFrame with admissions data.
+    - vit_df: pd.DataFrame with vitals data.
+    - out_df: pd.DataFrame with outcome data.
+
+    We check:
+    - dfs are sorted.
+    - data is complete and unique (except for vit_df).
+    - all dfs match in stay_id, subject_id, and hadm_id.
+    - each stay has exactly one outcome.
+    """
+
+    # Print Message
+    print("\nTesting whether data was processed correctly.")
+
+    # First check
+    assert adm_df.stay_id.is_monotonic_increasing and out_df.stay_id.is_monotonic_increasing
+    assert np.all(adm_df.hadm_id.values == vit_df.hadm_id.unique())   # Unique also checks sorting
+
+    # Second check
+    test_is_complete_ids(adm_df, "subject_id", "stay_id", "hadm_id")
+    test_is_complete_ids(vit_df, "subject_id", "stay_id", "hadm_id")
+    test_is_complete_ids(out_df, "stay_id")
+
+    test_is_unique_ids(adm_df, "subject_id", "stay_id", "hadm_id")
+    test_is_unique_ids(out_df, "stay_id")
+
+    # Third check  
+    assert np.array_equal(adm_df.stay_id.unique(), vit_df.stay_id.unique()) 
+    assert np.array_equal(adm_df.stay_id.unique(), out_df.stay_id.unique())
+
+    # Fourth check
+    assert out_df[["Death", "ICU", "Ward", "Discharge"]].sum(axis=1).eq(1).all()
+    assert out_df[["Death", "ICU", "Ward", "Discharge"]].isin([0,1]).all().all()
+
+    # Output message
+    print("Test passed!")
+    
