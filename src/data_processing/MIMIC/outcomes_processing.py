@@ -61,17 +61,14 @@ def get_first_icu_time(df):
     earliest_icu_time = (
         df
         .groupby("stay_id")
-        .apply(lambda x: (
+        .progress_apply(lambda x: (
             x
-            # Careunit has ICU in name
-            .query("careunit.str.contains('(?i)ICU', na=False, case=False)")
-            # Another ICU name
-            .query("careunit.str.contains('(?i)Neuro Stepdown', na=False, case=False)")
-            # Get transfer entry time
-            .intime
-            # Get minimum of all ICU entries
-            .min()
-        )
+            .query("""
+                careunit.str.contains('(?i)ICU', na=False, case=False) \
+                careunit.str.contains('(?i)Neuro Stepdown', na=False, case=False)""")       # Identify those transfers to ICU/Neuro Stepdown Wards
+            .intime                        # Get the entry time
+            .min()                        # Compute the minimum entry time
+            )
         )
     )
 
@@ -91,15 +88,13 @@ def get_first_discharge_time(df):
     earliest_discharge_time = (
         df
         .groupby("stay_id")
-        .apply(lambda x: (
+        .progress_apply(lambda x: (
             x
-            # Remove any transfers for death events
-            .query("~ eventtype.str.contains('(?i)DIED', na=False, case=False)")
+            .query("~ eventtype.str.contains('(?i)DIED', na=False, case=False)") # Remove Died discharge patients.
             # Within remaining transfers, get the discharge transfer
             .query("eventtype == 'discharge'")
             .squeeze()                     # Convert to pd.Series, we know there is exactly one discharge eventtype
             .dischtime                     # Get the discharge time
-
             )
         )
     )
@@ -327,7 +322,12 @@ def main():
         .assign(first_discharge=get_first_discharge_time(transfers_S1)) # Compute first discharge time
         .loc[:, ["first_death", "first_icu", "first_ward", "first_discharge",
                 "outtime", "discharge_location", "subject_id"]]
+        .query("first_death.ge(outtime) | first_death.isna()")    # Remove weird patients with death > outtime
+        .query("first_icu.ge(outtime) | first_icu.isna()")       # Remove weird patients with icu > outtime
+        .query("first_ward.ge(outtime) | first_ward.isna()")    # Remove weird patients with ward > outtime
+        .query("first_discharge.ge(outtime) | first_discharge.isna()")   # Remove weird patients with discharge > outtime (difference is usually writing down error)
     )
+
 
     # Testing for computed outcomes
     tests.test_events_after_outtime(earliest_outcome_times)
