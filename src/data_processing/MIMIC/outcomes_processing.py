@@ -277,7 +277,7 @@ def main():
         .query("outtime <= edouttime")
         # transfer intime before ed registration time
         .query("intime <= edregtime")
-        .query("dischtime - outtime_next >= @pd.Timedelta('-6h') | outtime_next.isna()")
+        .query("outtime_next - dischtime <= @pd.Timedelta('6h') | outtime_next.isna()")
         # discharge time not earlier than outtime_next (added -6 hours due to some potential delays)
     )
 
