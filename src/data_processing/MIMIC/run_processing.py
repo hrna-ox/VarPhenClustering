@@ -23,7 +23,7 @@ def main():
         vitals_processing.main()
 
     # Run outcomes
-    if not os.path.exists("data/MIMIC/interim/vitals_final.csv"):
+    if not os.path.exists("data/MIMIC/interim/vitals_process.csv"):
         outcomes_processing.main()
 
     pass
