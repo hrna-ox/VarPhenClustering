@@ -9,61 +9,162 @@ Model file to define GC-DaPh class.
 import torch
 import torch.nn as nn
 
-from src.models.model_utils import MLP
+from torchvision.ops import MLP
+from torch.nn import LSTM
 import src.models.Dir_VRNN.Dir_VRNN_utils as utils
 
 
-# ============= MAIN MODEL DEFINITION =============
+# Define Neural Networks
 
+# region Define LSTM Decoder v1 (use output at time t as input at time t+1)
+class LSTM_Dec_v1(nn.Module):
+    """
+    Implements LSTM Decoder architecture. A context vector of fixed dimension is given, and the output at each time-step is used as input for the next time-step.
+    """
+    def __init__(self,
+        input_dim: int,   # Dimensionality of input vectors
+        output_dim: int,  # Dimensionality of output vector
+        hidden_dim: int,  # Dimensionality of hidden state
+        num_layers: int = 1,  # Number of layers (default = 1)
+        dropout: float = 0.0, # Dropout rate (default = 0.0, i.e. no dropout)
+        **kwargs): 
+
+        # Call parent class constructor
+        super().__init__()
+
+        # Initialise parameters
+        self.i_dim, self.o_dim, self.h_dim = input_dim, output_dim, hidden_dim
+        self.n_layers, self.dropout = num_layers, dropout
+
+        # Define main LSTM layer and output layer
+        self.lstm = LSTM(input_size=self.i_dim, hidden_dim=self.h_dim, num_layers=self.n_layers, dropout=self.dropout, **kwargs)
+        self.fc_out = nn.Linear(self.h_dim, self.o_dim)
+
+    # Forward pass
+    def forward(self, x):
+        """
+        Forward pass of LSTM Decoder. Given a context vector, then 
+        """
+        return None
+# endregion
+
+# region Define LSTM Decoder v2 (use context vector as input for multiple time steps)
+class LSTM_Dec_v2(nn.Module):
+    """
+    Implements LSTM Decoder architecture. A context vector of fixed dimension is given, and used as the sequence of input vectors for multiple time steps for the LSTM.
+    """
+    def __init__(self, 
+        time_steps: int, # Number of observations to generate
+        input_dim: int,  # Dimensionality of input vectors
+        output_dim: int, # Dimensionality of output vector
+        hidden_dim: int, # Dimensionality of hidden state
+        num_layers: int = 1,  # Number of layers (default = 1)
+        dropout: float = 0.0, # Dropout rate (default = 0.0, i.e. no dropout)
+        **kwargs):
+
+        # Call parent class constructor
+        super().__init__()
+
+        # Initialise parameters
+        self.num_steps = time_steps
+        self.i_dim, self.o_dim, self.h_dim = input_dim, output_dim, hidden_dim
+        self.n_layers, self.dropout = num_layers, dropout
+
+        # Define main LSTM layer and output layer
+        self.lstm = LSTM(input_size=self.i_dim, hidden_dim=self.h_dim, num_layers=self.n_layers, dropout=self.dropout, **kwargs)
+        self.fc_out = nn.Linear(self.h_dim, self.o_dim)
+
+    # Forward pass
+    def forward(self, context_vector: torch.Tensor):
+        """
+        Forward pass of v2 LSTM Decoder. Given context vector, use it as input sequence for LSTM.
+        
+        Params:
+            - context_vector: context vector of fixed dimensionality, of shape (N, D), where N is batch size and D is latent dimensionality.
+        """
+
+        # Define input sequence for LSTM
+        input_seq = context_vector.unsqueeze(1).expand(-1, self.num_steps, -1) # (N, T, D)
+        batch_size = input_seq.shape[0]
+
+        # Pass through LSTM
+        h0 = torch.zeros(self.num_layers, self.batch_size, batch_size, self.h_dim).to(context_vector.device)
+        c0 = torch.zeros(self.num_layers, self.batch_size, batch_size, self.h_dim).to(context_vector.device)
+        output, _ = self.lstm(input_seq, (h0, c0)) # (N, T, D)
+
+        return output
+# endregion
+
+
+
+# region DirVRNN
 class BaseModel(nn.Module):
+    """ 
+    Implements DirVRNN model as described in the paper.
 
-    def __init__(self, input_size: int, outcome_size: int, num_clus: int, latent_size: int = 10,
-                 gate_layers: int = 2, gate_nodes: int = 2,
-                 feat_extr_layers: int = 2, feat_extr_nodes: int = 2, **kwargs):
+    Given a multi-dimensional time-series of observations, we model cluster assignments over time using a window approach. For each window:
+    a) estimate data generation,
+    b) estimate cluster assignments,
+    c) estimate cell state,
+    d) update cluster representations.
+    """
+    def __init__(self, 
+                i_size: int, 
+                o_size: int, 
+                w_size: int,
+                K: int, 
+                l_size: int = 10,
+                gate_hidden_l: int = 2,
+                gate_hidden_n: int = 20,
+                **kwargs):
         """
         Object initialization.
 
         Params:
-            - input_size: dimensionality of observation data (number of time_series).
-            - outcome_size: dimensionality of outcome data (number of outcomes).
-            - num_clus: number of clusters to consider.
-            - latent_size: dimensionality of latent space (default = 10).
-            - gate_layers: number of hidden_layers for prior, encoder, representation layers (default = 2).
-            - gate_nodes: number of nodes per hidden_layer for gate_layers layers (default = 30).
-            - feat_extr_layers: number of hidden_layers for feature extraction functions (default = 2).
-            - feat_extr_nodes: number of nodes per layer for feat_extr_layers layers (default = 20).
-            - kwargs: additional arguments (not used) - for compatibility with other models.
+            - i_size: dimensionality of observation data (number of time_series).
+            - o_size: dimensionality of outcome data (number of outcomes).
+            - w_size: window size over which to update cell state and generate data.
+            - K: number of clusters to consider.
+            - l_size: dimensionality of latent space (default = 10).
+            - gate_hidden_l: number of hidden layers for gate networks (default = 2).
+            - gate_hidden_n: number of nodes of hidden layers for gate networks (default = 20).
+            - kwargs: additional arguments for compatibility.
         """
         super().__init__()
 
-        # ======== Load Parameters as Attributes ==========
+        # Initialise input parameters
+        self.i_size, self.o_size, self.w_size = i_size, o_size, w_size
+        self.K, self.l_size = K, l_size
+        self.gate_l, self.gate_n = gate_hidden_l, gate_hidden_n
 
-        # Fundamental variables
-        self.input_size = input_size
-        self.outcome_size = outcome_size
-        self.K = num_clus
-        self.latent_dim = latent_size
+        # Parameters for Clusters
+        self.c_means = torch.rand(int(self.K), int(self.l_size))
+        self.log_c_vars = torch.rand(int(self.K), )
 
-        # Variables related to neural network parameters
-        self.gate_layers = gate_layers
-        self.gate_nodes = gate_nodes
-        self.feat_extr_layers = feat_extr_layers
-        self.feat_extr_nodes = feat_extr_nodes
 
-        # Parameters for clusters
-        self.clus_means = torch.rand(int(self.K), int(self.latent_dim))
-        self.log_clus_vars = torch.rand(int(self.K), )
+        # Initialise encoder block - estimate alpha parameter of Dirichlet distribution given h and extracted input data features.
+        self.encoder = MLP(
+            in_channels= self.l_size + self.l_size,      # input: concat(h, extr(x))
+            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
+            norm_layer=None,
+            activation_layer=nn.ReLU,             # default activation function is ReLU
+            inplace=True,
+            bias=True,
+            dropout=0.0                           # default dropout is 0 (no dropout)
+        )
 
-        # ====== Define Model Blocks ========
-        # Define the encoder network - Computes alpha of Dirichlet distribution given h and z
-        self.encoder = MLP(input_size=self.latent_dim + self.latent_dim,  # input is z_extr_features and h
-                           output_size=self.K,  # output is alpha vector of size K
-                           act_fn="relu",
-                           hidden_layers=self.gate_layers,
-                           hidden_nodes=self.gate_nodes,
-                           output_fn="relu")
-
-        # Define the decoder network - computes mean, var of Observation data
+        # Initialise Prior Block - estimate alpha parameter of Dirichlet distribution given h.
+        self.prior = MLP(
+            in_channels=self.l_size,               # input: h
+            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
+            norm_layer=None,
+            activation_layer=nn.ReLU,             # default activation function is ReLU
+            inplace=True,
+            bias=True,
+            dropout=0.0                           # default dropout is 0 (no dropout)
+        )
+        
+        # Initialise decoder block - given z, h, we generate a w_size sequence of observations, x.
         self.decoder = MLP(input_size=self.latent_dim + self.latent_dim,  # input is z_extr_features and h
                            output_size=self.input_size + self.input_size,  # output is mean/var of observation
                            hidden_layers=self.gate_layers,
@@ -259,3 +360,6 @@ class BaseModel(nn.Module):
         history_objects["pred_loss"][:, t] = pred_loss
 
         return - loss, history_objects      # want to maximize loss, so return negative loss
+# endregion
+        
+        return None
