@@ -96,7 +96,7 @@ class LSTM_Dec_v1(nn.Module):
         self.n_layers, self.dropout = num_layers, dropout
 
         # Define main LSTM layer and output layer
-        self.lstm_cell = LSTM(input_size=self.i_dim, hidden_dim=self.h_dim, num_layers=self.n_layers, dropout=self.dropout, **kwargs)
+        self.lstm_cell = LSTM(input_size=self.i_dim, hidden_size=self.h_dim, num_layers=self.n_layers, dropout=self.dropout, **kwargs)
         self.fc_out = nn.Linear(self.h_dim, self.i_dim)
 
     # Forward pass
@@ -114,6 +114,7 @@ class LSTM_Dec_v1(nn.Module):
         # Define trackers for cell and hidden states.
         c_states = torch.zeros(bs, T, self.h_dim).to(c_vector.device)
         h_states = torch.zeros(bs, T, self.h_dim).to(c_vector.device)
+        outputs = torch.zeros(bs, T, self.o_dim).to(c_vector.device)
 
         # Set values at time 0
         c_states[:, 0, :] = c_vector
@@ -128,14 +129,15 @@ class LSTM_Dec_v1(nn.Module):
 
             # Pass through LSTM cell and update input-cell-hidden states
             h_t, c_t = self.lstm_cell(i_t, (h_t, c_t))
-            i_t = self.fc_out(c_t)
+            o_t = self.fc_out(c_t)
 
             # Save states
             c_states[:, t, :] = c_t
             h_states[:, t, :] = h_t
+            outputs[:, t, :] = o_t
 
         # Return cell and hidden states
-        return h_states, c_states
+        return h_states, c_states, outputs
 # endregion
 
 # region Define LSTM Decoder v2 (use context vector as input for multiple time steps)
@@ -243,9 +245,10 @@ class BaseModel(nn.Module):
             bias=True,
             dropout=0.0                           # default dropout is 0 (no dropout)
         )
-        self.enc_out = nn.Softmax(dim=-1)(
-            nn.Linear(self.gate_n, self.K)
-        )                                           # output is K-dimensional vector of cluster probabilities
+        self.enc_out = nn.Sequential(
+            nn.Linear(self.gate_n, self.K),
+            nn.Softmax(dim=-1)
+        )                                # output is K-dimensional vector of cluster probabilities
 
         # Initialise Prior Block - estimate alpha parameter of Dirichlet distribution given h.
         self.prior = MLP(
@@ -257,15 +260,16 @@ class BaseModel(nn.Module):
             bias=True,
             dropout=0.0                           # default dropout is 0 (no dropout)
         )
-        self.prior_out = nn.Softmax(dim=-1)(
-            nn.Linear(self.gate_n, self.K)
-        )                                          # output is K-dimensional vector of cluster probabilities
+        self.prior_out = nn.Sequential(
+            nn.Linear(self.gate_n, self.K),
+            nn.Softmax(dim=-1)
+        )
         
         # Initialise decoder block - given z, h, we generate a w_size sequence of observations, x.
         self.decoder = LSTM_Dec_v1(
             seq_len=self.w_size,
-            output_dim=self.input_size + self.input_size, # output is concatenation of mean-log var of observation
-            hidden_dim=self.hidden_size,
+            output_dim=self.i_size + self.i_size, # output is concatenation of mean-log var of observation
+            hidden_dim=self.l_size,
             num_layers=1,
             dropout=0.0
         )
@@ -280,9 +284,10 @@ class BaseModel(nn.Module):
             bias=True,
             dropout=0.0                           # default dropout is 0 (no dropout)
         )
-        self.pred_out = nn.Softmax(dim=-1)(
-            nn.Linear(self.gate_n, self.o_size)
-        )                                          # output is o_size-dimensional vector of outcome probabilities
+        self.pred_out = nn.Sequential(
+            nn.Linear(self.gate_n, self.o_size),
+            nn.Softmax(dim=-1)
+        )                                     # output is o_size-dimensional vector of outcome probabilities
         
 
         # Define feature transformation functions
@@ -295,9 +300,10 @@ class BaseModel(nn.Module):
             bias=True,
             dropout=0.0                           # default dropout is 0 (no dropout)
         )
-        self.phi_x_out = nn.Tanh(
-            nn.Linear(self.gate_n, self.l_size)
-        )                                          # output is l_size-dimensional vector of latent space features
+        self.phi_x_out = nn.Sequential(
+            nn.Linear(self.gate_n, self.l_size),
+            nn.Tanh()
+        )                                  # output is l_size-dimensional vector of latent space features
 
         self.phi_z = MLP(
             in_channels=self.l_size,               # input: z
@@ -308,9 +314,10 @@ class BaseModel(nn.Module):
             bias=True,
             dropout=0.0                           # default dropout is 0 (no dropout)
         )
-        self.phi_z_out = nn.Tanh(
-            nn.Linear(self.gate_n, self.l_size)
-        )                                          # output is l_size-dimensional vector of latent space features
+        self.phi_z_out = nn.Sequential(
+            nn.Linear(self.gate_n, self.l_size),
+            nn.Tanh()
+        )                                    # output is l_size-dimensional vector of latent space features
 
         # Define Cell Update Gate Functions
         self.state_update = MLP(
@@ -322,10 +329,10 @@ class BaseModel(nn.Module):
             bias=True,
             dropout=0.0                           # default dropout is 0 (no dropout)
         )
-        self.state_out = nn.Tanh(
-            nn.Linear(self.gate_n, self.l_size)
-        )                                          # output is l_size-dimensional vector of latent space features
-
+        self.state_out = nn.Sequential(
+            nn.Linear(self.gate_n, self.l_size),
+            nn.Tanh()
+        )
     # Define training process for this class.
     def forward(self, x, y):
         """
@@ -345,8 +352,13 @@ class BaseModel(nn.Module):
         # Extract dimensions
         batch_size, seq_len, input_size = x.size()
 
-        # Initialize the current hidden state as the null vector and cluster means as random objects in latent space
+        # Initialize the current hidden state as the null vector
         h = torch.zeros(batch_size, self.l_size).to(x.device)
+
+        # Initialise probability of cluster assignment as uniform
+        est_pi = torch.ones(batch_size, self.K) / self.K
+        est_z = gen_samples_from_assign(est_pi, self.clus_means, self.clus_log_vars)
+                
 
         # Initialise loss value
         loss = 0
@@ -354,73 +366,80 @@ class BaseModel(nn.Module):
 
         # ================== Iteration through time-steps ==============
         # Can also edit this to use a sliding window approach, where t goes from 0 to seq_len - w_size
-        for window_tim in range(seq_len):
+        for window_id in range(num_time_steps):
+            "Iterate through each window block"
+            
+            # Bottom and high indices
+            lower_t, higher_t = window_id * self.w_size, (window_id + 1) * self.w_size
 
-            # Subset observation to time t
-            x_t = x[:, t, :]
-
-            # Compute alpha based on prior gate
-            alpha_prior = self.prior_out(self.prior(h)) + eps 
-
-            # Compute alpha of encoder network
-            alpha_enc = self.enc_out(
-                self.encoder(
-                    torch.cat([
-                        self.phi_x(x_t),  # Extract feature from x
-                        h
-                    ], dim=-1)  # Concatenate with cell state in last dimension
-                ) 
-            ) + eps  # Add small value to avoid numerical instability
-
-
-            # Sample cluster distribution from alpha_enc, and estimate samples from clusters
-            pi_samples = sample_dir(alpha=alpha_enc)
-            z_samples = gen_samples_from_assign(
-                pi_assign=pi_samples, 
-                clus_means=self.clus_means, 
-                clus_log_vars=self.log_clus_vars
+            # First we estimate the observations for the incoming window given current cell state
+            h_dec, c_dec, output_pred = self.decoder(
+                torch.cat([
+                    self.phi_z(est_z),
+                    h
+                ], dim=-1)
             )
-            # pi_samples = torch.divide(alpha_enc, torch.sum(alpha_enc, dim=-1, keepdim=True))
 
-            # Compute decoder parameters (mean-logvar of observation data)
-            dec_output = self.dec_out(
-                self.decoder(
-                    torch.cat([
-                        self.phi_z(z_samples),
-                        h
-                    ], dim=-1)
-                )
-            )
-            mu_g, logvar_g = torch.chunk(dec_output, chunks=2, dim=-1)
+            # Decompose obvs_pred into mean and log-variance - shape is (bs, T, 2 * input_size)
+            mu_g, logvar_g = torch.chunk(output_pred, chunks=2, dim=-1)
             var_g = torch.exp(logvar_g) + eps
 
-            # -------- COMPUTE LOSS FOR TIME t -----------
+            for _w_id, t in enumerate(range(lower_t, higher_t)):
+                # Estimate alphas for each time step within the window. 
 
-            # Data Likelihood component
-            log_lik = losses.log_gaussian_lik(x_t, mu_g, var_g)
+                # Subset observation to time t
+                x_t = x[:, t, :]
 
-            # Posterior KL-divergence component
-            kl_div = losses.dir_kl_div(a1=alpha_enc, a2=alpha_prior)
-            # quot = torch.log(torch.divide(alpha_enc, alpha_prior + 1e-8) + 1e-8)
-            # kl_div = torch.mean(torch.sum(alpha_enc * quot, dim=-1))
+                # Compute alpha based on prior gate
+                alpha_prior = self.prior_out(self.prior(h)) + eps 
 
-            # Add to loss tracker
-            loss += log_lik - kl_div
-
-
-            # ----- UPDATE CELL STATE ------
-            h = self.state_out(
-                    self.state_update(
+                # Compute alpha of encoder network
+                alpha_enc = self.enc_out(
+                    self.encoder(
                         torch.cat([
-                            self.phi_z(z_samples),
-                            self.phi_x(x_t),
+                            self.phi_x(x_t),  # Extract feature from x
                             h
-                        ], dim=-1)
-                    )
+                        ], dim=-1)  # Concatenate with cell state in last dimension
+                    ) 
+                ) + eps  # Add small value to avoid numerical instability
+
+
+                # Sample cluster distribution from alpha_enc, and estimate samples from clusters
+                est_pi = sample_dir(alpha=alpha_enc)
+                est_z = gen_samples_from_assign(
+                    pi_assign=est_pi, 
+                    clus_means=self.clus_means, 
+                    clus_log_vars=self.log_clus_vars
                 )
+                # pi = torch.divide(alpha_enc, torch.sum(alpha_enc, dim=-1, keepdim=True))
+
+                # -------- COMPUTE LOSS FOR TIME t -----------
+
+                # Data Likelihood component
+                log_lik = losses.log_gaussian_lik(x_t, mu_g[:, _w_id, :], var_g[:, _w_id, :])
+
+                # Posterior KL-divergence component
+                kl_div = losses.dir_kl_div(a1=alpha_enc, a2=alpha_prior)
+                # quot = torch.log(torch.divide(alpha_enc, alpha_prior + 1e-8) + 1e-8)
+                # kl_div = torch.mean(torch.sum(alpha_enc * quot, dim=-1))
+
+                # Add to loss tracker
+                loss += log_lik - kl_div
+
+
+                # ----- UPDATE CELL STATE ------
+                h = self.state_out(
+                        self.state_update(
+                            torch.cat([
+                                self.phi_z(est_z),
+                                self.phi_x(x_t),
+                                h
+                            ], dim=-1)
+                        )
+                    )
 
         # Once all times have been computed, make predictions on outcome
-        y_pred = self.pred_out(self.predictor(z_samples))
+        y_pred = self.pred_out(self.predictor(est_z))
 
         # Compute log loss of outcome
         pred_loss = losses.cat_cross_entropy(y_true=y, y_pred=y_pred)

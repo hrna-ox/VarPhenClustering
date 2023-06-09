@@ -1,7 +1,7 @@
 {
   "data_config": {
      "data_name": "MIMIC",
-     "target_window": 12,
+     "target_window": 48,
      "feat_set": "vit-sta",
      "time_range": [
         0,
