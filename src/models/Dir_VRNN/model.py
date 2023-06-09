@@ -11,10 +11,64 @@ import torch.nn as nn
 
 from torchvision.ops import MLP
 from torch.nn import LSTM
-import src.models.Dir_VRNN.Dir_VRNN_utils as utils
+
+import src.models.loss_functions as losses
 
 
-# Define Neural Networks
+# region ========== DEFINE AUXILIARY FUNCTIONS ==========
+
+eps = 1e-6  # small constant to avoid numerical issues
+
+def sample_dir(alpha):
+    """
+    Approximation to Dirichlet sampling given parameter alpha, that allows for back-propagation.
+    First, we sample gamma variables based on inverse transform sampling. Then we combine them
+    to generate a dirichlet vector.
+
+    Inputs:
+        - alpha: vector of shape (bs, K) with corresponding alpha parameters.
+
+    Outputs:
+        - generated samples of size (bs).
+    """
+
+    # Use inverse transform sampling from uniform samples to generate gamma samples
+    u_samples = torch.rand(size=alpha.shape, device=alpha.device)
+    gamma_samples = (alpha * u_samples * torch.exp(torch.lgamma(alpha))) ** (1 / alpha)
+
+    # Divide gamma samples across rows to normalise (which gives a dirichlet sample)
+    row_sum = torch.sum(gamma_samples, dim=1, keepdim=True)
+    dir_samples = gamma_samples / (row_sum + eps)
+
+    return dir_samples
+
+
+def gen_samples_from_assign(pi_assign, clus_means, log_clus_vars):
+    """
+    Generate samples from latent variable cluster assignment. We re-parameterize normal sampling
+    in order to ensure back-propagation.
+
+    Args:
+        pi_assign: tensor of shape (bs, K) with probabilities of cluster assignment. Rows sum to 1.
+        clus_means: tensor of shape (K, l_dim) with cluster mean vectors.
+        log_clus_vars: tensor of shape (K, ) with cluster log of variance parameters.
+
+    Outputs:
+        tensor of shape (bs, l_dim) with generated samples.
+    """
+    # Get parameters from vectors
+    K, l_dim = clus_means.shape
+    
+    # Generate standard normal samples and apply transformation to obtain multivariate normal
+    stn_samples = torch.randn(size=[K, l_dim], device=clus_means.device)
+    mvn_samples = clus_means + torch.exp(0.5 * log_clus_vars).reshape(-1, 1) * stn_samples
+
+    # Combine multivariate normal samples with cluster assignment probabilities
+    samples = torch.matmul(pi_assign, mvn_samples)
+
+    return samples
+# endregion
+
 
 # region Define LSTM Decoder v1 (use output at time t as input at time t+1)
 class LSTM_Dec_v1(nn.Module):
@@ -84,7 +138,6 @@ class LSTM_Dec_v1(nn.Module):
         return h_states, c_states
 # endregion
 
-
 # region Define LSTM Decoder v2 (use context vector as input for multiple time steps)
 class LSTM_Dec_v2(nn.Module):
     """
@@ -119,19 +172,20 @@ class LSTM_Dec_v2(nn.Module):
         Params:
             - context_vector: context vector of fixed dimensionality, of shape (N, D), where N is batch size and D is latent dimensionality.
         """
+        #  Get parameters
+        bs, T = context_vector.shape[0], self.seq_len
 
         # Define input sequence for LSTM
         input_seq = context_vector.unsqueeze(1).expand(-1, self.num_steps, -1) # (N, T, D)
         batch_size = input_seq.shape[0]
 
         # Pass through LSTM
-        h0 = torch.zeros(self.num_layers, self.batch_size, batch_size, self.h_dim).to(context_vector.device)
-        c0 = torch.zeros(self.num_layers, self.batch_size, batch_size, self.h_dim).to(context_vector.device)
+        h0 = torch.zeros(bs, T, self.h_dim).to(context_vector.device)
+        c0 = torch.zeros(bs, T, self.h_dim).to(context_vector.device)
         output, _ = self.lstm(input_seq, (h0, c0)) # (N, T, D)
 
         return output
 # endregion
-
 
 
 # region DirVRNN
@@ -189,6 +243,9 @@ class BaseModel(nn.Module):
             bias=True,
             dropout=0.0                           # default dropout is 0 (no dropout)
         )
+        self.enc_out = nn.Softmax(dim=-1)(
+            nn.Linear(self.gate_n, self.K)
+        )                                           # output is K-dimensional vector of cluster probabilities
 
         # Initialise Prior Block - estimate alpha parameter of Dirichlet distribution given h.
         self.prior = MLP(
@@ -200,6 +257,9 @@ class BaseModel(nn.Module):
             bias=True,
             dropout=0.0                           # default dropout is 0 (no dropout)
         )
+        self.prior_out = nn.Softmax(dim=-1)(
+            nn.Linear(self.gate_n, self.K)
+        )                                          # output is K-dimensional vector of cluster probabilities
         
         # Initialise decoder block - given z, h, we generate a w_size sequence of observations, x.
         self.decoder = LSTM_Dec_v1(
@@ -210,51 +270,67 @@ class BaseModel(nn.Module):
             dropout=0.0
         )
 
-        # 
-
-        # Define the prior network - computes Dirichlet alpha prior given previous cell state
-        self.prior = MLP(input_size=self.latent_dim,  # input is h at previous time step
-                         output_size=self.K,  # output is alpha dirichlet for prior distribution
-                         act_fn="relu",
-                         hidden_layers=self.gate_layers,
-                         hidden_nodes=self.gate_nodes,
-                         output_fn="relu")
-
         # Define the output network - computes outcome prediction given predicted cluster assignments
-        self.predictor = MLP(input_size=self.latent_dim,  # input is generated samples at last time step
-                             output_size=self.outcome_size,  # output is categorical parameter p
-                             hidden_layers=self.gate_layers,
-                             hidden_nodes=self.gate_nodes,
-                             act_fn="relu",
-                             output_fn="softmax")
+        self.predictor = MLP(
+            in_channels=self.l_size,               # input: h
+            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
+            norm_layer=None,
+            activation_layer=nn.ReLU,             # default activation function is ReLU
+            inplace=True,
+            bias=True,
+            dropout=0.0                           # default dropout is 0 (no dropout)
+        )
+        self.pred_out = nn.Softmax(dim=-1)(
+            nn.Linear(self.gate_n, self.o_size)
+        )                                          # output is o_size-dimensional vector of outcome probabilities
+        
 
-        # Define feature extractors - feature representations for input observation and latent variables
-        self.phi_x = MLP(input_size=self.input_size,  # input is set of observations.
-                         output_size=self.latent_dim,  # output is extracted features.
-                         hidden_layers=self.feat_extr_layers,
-                         hidden_nodes=self.feat_extr_nodes,
-                         act_fn="relu",
-                         output_fn="tanh")
+        # Define feature transformation functions
+        self.phi_x = MLP(
+            in_channels=self.i_size,               # input: x
+            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
+            norm_layer=None,
+            activation_layer=nn.ReLU,             # default activation function is ReLU
+            inplace=True,
+            bias=True,
+            dropout=0.0                           # default dropout is 0 (no dropout)
+        )
+        self.phi_x_out = nn.Tanh(
+            nn.Linear(self.gate_n, self.l_size)
+        )                                          # output is l_size-dimensional vector of latent space features
 
-        self.phi_z = MLP(input_size=self.latent_dim,  # input is average representation vector.
-                        output_size=self.latent_dim,  # output is extracted feature version of input.
-                        hidden_layers=self.feat_extr_layers,
-                        hidden_nodes=self.feat_extr_nodes,
-                        act_fn="relu",
-                        output_fn="tanh")
+        self.phi_z = MLP(
+            in_channels=self.l_size,               # input: z
+            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
+            norm_layer=None,
+            activation_layer=nn.ReLU,             # default activation function is ReLU
+            inplace=True,
+            bias=True,
+            dropout=0.0                           # default dropout is 0 (no dropout)
+        )
+        self.phi_z_out = nn.Tanh(
+            nn.Linear(self.gate_n, self.l_size)
+        )                                          # output is l_size-dimensional vector of latent space features
 
-        # Recurrence - how to update Cell State
-        self.cell_state_update = MLP(input_size=self.latent_dim + self.latent_dim + self.latent_dim,
-                                     output_size=self.latent_dim,
-                                     hidden_layers=self.gate_layers,
-                                     hidden_nodes=self.gate_nodes,
-                                     act_fn="relu",
-                                     output_fn="tanh")
+        # Define Cell Update Gate Functions
+        self.state_update = MLP(
+            in_channels=self.l_size + self.l_size + self.l_size, # input: concat(h, phi_x, phi_z)
+            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
+            norm_layer=None,
+            activation_layer=nn.ReLU,             # default activation function is ReLU
+            inplace=True,
+            bias=True,
+            dropout=0.0                           # default dropout is 0 (no dropout)
+        )
+        self.state_out = nn.Tanh(
+            nn.Linear(self.gate_n, self.l_size)
+        )                                          # output is l_size-dimensional vector of latent space features
 
     # Define training process for this class.
     def forward(self, x, y):
         """
-        Model loss computation given batch objects during training.
+        Model loss computation given batch objects during training. Note that we implement 
+        a window size within our model itself. Time alignment is checked through pre-processing.
 
         Params:
             - x: pytorch Tensor object of input data with shape (batch_size, max_seq_len, input_size);
@@ -262,13 +338,6 @@ class BaseModel(nn.Module):
 
         Output:
             - loss: pytorch Tensor object of loss value.
-            - history_objects: dictionary of relevant objects during training:
-                a) alpha parameters of Dirichlet distribution for each time step;
-                b) cluster assignment probabilities for each time step;
-                c) predicted outcomes for the last time step;
-                d) estimated cluster means at each time step;
-                e) estimated generated data at each time step;
-                f) cell state vector at each time step.
         """
 
         # ========= Define relevant variables and initialise variables ===========
@@ -277,129 +346,88 @@ class BaseModel(nn.Module):
         batch_size, seq_len, input_size = x.size()
 
         # Initialize the current hidden state as the null vector and cluster means as random objects in latent space
-        h = torch.zeros(batch_size, self.latent_dim).to(x.device)
-
-        # Initialise history objects
-        history_objects = {
-            "alpha_prior": torch.zeros(size=[batch_size, seq_len, self.K]).to(x.device),
-            "alpha_enc": torch.zeros(size=[batch_size, seq_len, self.K]).to(x.device),
-            "est_pi": torch.zeros(size=[batch_size, seq_len, self.K]).to(x.device),
-            "est_cluster_means": torch.zeros(size=[seq_len, self.K, self.latent_dim]).to(x.device),
-            "est_outcomes": torch.zeros(size=[batch_size, self.outcome_size]).to(x.device),
-            "est_gen_mean": torch.zeros(size=[batch_size, seq_len, self.input_size]).to(x.device),
-            "est_gen_data": torch.zeros(size=[batch_size, seq_len, self.input_size]).to(x.device),
-            "cell_state": torch.zeros(size=[batch_size, seq_len, self.latent_dim]).to(x.device),
-            "pred_loss": torch.zeros(size=[batch_size, seq_len]).to(x.device)
-        }
+        h = torch.zeros(batch_size, self.l_size).to(x.device)
 
         # Initialise loss value
         loss = 0
+        num_time_steps = int(seq_len / self.w_size)
 
         # ================== Iteration through time-steps ==============
-        for t in range(seq_len):
+        # Can also edit this to use a sliding window approach, where t goes from 0 to seq_len - w_size
+        for window_tim in range(seq_len):
 
             # Subset observation to time t
             x_t = x[:, t, :]
 
-            # Compute encoder alpha by extracting features from input and concatenating with hidden state
-            joint_enc_input = torch.cat([
-                self.phi_x(x_t),  # Extract feature from x
-                h],
-                dim=-1  # Concatenate with cell state in last dimension
-            )
-            alpha_enc = self.encoder(joint_enc_input) + 1e-6  # Add small value to avoid numerical instability
+            # Compute alpha based on prior gate
+            alpha_prior = self.prior_out(self.prior(h)) + eps 
 
-            # Sample cluster distribution from Dirichlet with parameter alpha_enc
-            pi_samples = utils.sample_dirichlet(alpha=alpha_enc)
+            # Compute alpha of encoder network
+            alpha_enc = self.enc_out(
+                self.encoder(
+                    torch.cat([
+                        self.phi_x(x_t),  # Extract feature from x
+                        h
+                    ], dim=-1)  # Concatenate with cell state in last dimension
+                ) 
+            ) + eps  # Add small value to avoid numerical instability
+
+
+            # Sample cluster distribution from alpha_enc, and estimate samples from clusters
+            pi_samples = sample_dir(alpha=alpha_enc)
+            z_samples = gen_samples_from_assign(
+                pi_assign=pi_samples, 
+                clus_means=self.clus_means, 
+                clus_log_vars=self.log_clus_vars
+            )
             # pi_samples = torch.divide(alpha_enc, torch.sum(alpha_enc, dim=-1, keepdim=True))
 
-            # Average over clusters to estimate latent variable - we do this via sampling from the clusters
-            clus_samples = utils.sample_normal(self.clus_means, self.log_clus_vars)
-            z_samples = torch.matmul(pi_samples, clus_samples)
-
-            # Compute decoder mean/var parameters by extracting features from latent and concatenating with hidden state
-            joint_dec_input = torch.cat([
-                self.phi_z(z_samples),
-                h],
-                dim=-1
+            # Compute decoder parameters (mean-logvar of observation data)
+            dec_output = self.dec_out(
+                self.decoder(
+                    torch.cat([
+                        self.phi_z(z_samples),
+                        h
+                    ], dim=-1)
+                )
             )
-            mu_g, logvar_g = torch.chunk(  # split output vector of decoder to 2 chunks
-                self.decoder(joint_dec_input),
-                chunks=2,
-                dim=-1
-            )
-            var_g = torch.exp(logvar_g)
-            try:
-                assert torch.all(var_g > 0)
-            except AssertionError as e:
-                print("\nvarg_g:\n", var_g)
-                print("\nlogvar_g:\n", logvar_g)
-                print("\njoint dec input:\n", joint_dec_input)
-                print("\nh:\n", h)
-                print("\nz samples:\n", z_samples)
-                print("\nClus samples:\n", clus_samples)
-                print("\nPi samples:\n", pi_samples)
-                print("\nAlpha enc:\n", alpha_enc)
-                print("\njoint enc input:\n", joint_enc_input)
-                print("\nx_t:\n", x_t)
-
-                raise ValueError("Variance is not positive definite.")
-
-            # Compute prior parameters
-            alpha_prior = self.prior(h)
-
-            # Update Cluster means
-            cluster_means = utils.estimate_new_clus(pi_samples, z_samples)
+            mu_g, logvar_g = torch.chunk(dec_output, chunks=2, dim=-1)
+            var_g = torch.exp(logvar_g) + eps
 
             # -------- COMPUTE LOSS FOR TIME t -----------
 
             # Data Likelihood component
-            log_lik = utils.compute_gaussian_log_lik(x_t, mu_g, var_g)
+            log_lik = losses.log_gaussian_lik(x_t, mu_g, var_g)
 
-            # KL divergence
-            kl_div = utils.compute_dirichlet_kl_div(alpha_enc+1e-8, alpha_prior+1e-8)
+            # Posterior KL-divergence component
+            kl_div = losses.dir_kl_div(a1=alpha_enc, a2=alpha_prior)
             # quot = torch.log(torch.divide(alpha_enc, alpha_prior + 1e-8) + 1e-8)
             # kl_div = torch.mean(torch.sum(alpha_enc * quot, dim=-1))
 
             # Add to loss tracker
             loss += log_lik - kl_div
 
-            # If last time step, add outcome prediction term
-            if t == seq_len - 1:
-
-                # Predict outcome
-                y_pred = self.predictor(z_samples)
-
-                # Compute log loss of outcome
-                pred_loss = utils.compute_outcome_loss(y_true=y, y_pred=y_pred)
-
-                # Add to total loss
-                loss += pred_loss
 
             # ----- UPDATE CELL STATE ------
-            state_update_input = torch.cat([
-                self.phi_z(z_samples),
-                self.phi_x(x_t),
-                h],
-                dim=-1
-            )
-            h = self.cell_state_update(state_update_input)
+            h = self.state_out(
+                    self.state_update(
+                        torch.cat([
+                            self.phi_z(z_samples),
+                            self.phi_x(x_t),
+                            h
+                        ], dim=-1)
+                    )
+                )
 
-            # --------- ADD OBJECTS TO HISTORY TRACKER ---------
-            history_objects["alpha_prior"][:, t, :] = alpha_prior
-            history_objects["alpha_enc"][:, t] = alpha_enc
-            history_objects["est_pi"][:, t, :] = pi_samples
-            history_objects["est_cluster_means"][t, :, :] = cluster_means
-            history_objects["est_gen_mean"][:, t, :] = mu_g
-            history_objects["est_gen_data"][:, t, :] = torch.normal(mu_g, torch.sqrt(var_g))
-            history_objects["cell_state"][:, t, :] = h
-            
+        # Once all times have been computed, make predictions on outcome
+        y_pred = self.pred_out(self.predictor(z_samples))
 
-        # Add outcome
-        history_objects["y_pred"] = y_pred
-        history_objects["pred_loss"][:, t] = pred_loss
+        # Compute log loss of outcome
+        pred_loss = losses.cat_cross_entropy(y_true=y, y_pred=y_pred)
 
-        return - loss, history_objects      # want to maximize loss, so return negative loss
+        # Add to total loss
+        loss += pred_loss
+
+        return (-1) * loss      # want to maximize loss, so return negative loss
 # endregion
         
-        return None
