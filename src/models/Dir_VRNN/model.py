@@ -16,7 +16,6 @@ from torch.utils.data import DataLoader, TensorDataset
 import wandb
 
 import src.models.loss_functions as losses
-import src.models.general_utils as utils
 
 
 # region ========== DEFINE AUXILIARY FUNCTIONS ==========
@@ -40,32 +39,32 @@ def sample_dir(alpha):
     u_samples = torch.rand(size=alpha.shape, device=alpha.device)
     gamma_samples = (alpha * u_samples * torch.exp(torch.lgamma(alpha))) ** (1 / alpha)
 
-    # Divide gamma samples across rows to normalise (which gives a dirichlet sample)
+    # Divide gamma samples across rows to normalize (which gives a dirichlet sample)
     row_sum = torch.sum(gamma_samples, dim=1, keepdim=True)
     dir_samples = gamma_samples / (row_sum + eps)
 
     return dir_samples
 
 
-def gen_samples_from_assign(pi_assign, clus_means, log_clus_vars):
+def gen_samples_from_assign(pi_assign, c_means, log_clus_vars):
     """
     Generate samples from latent variable cluster assignment. We re-parameterize normal sampling
     in order to ensure back-propagation.
 
     Args:
         pi_assign: tensor of shape (bs, K) with probabilities of cluster assignment. Rows sum to 1.
-        clus_means: tensor of shape (K, l_dim) with cluster mean vectors.
+        c_means: tensor of shape (K, l_dim) with cluster mean vectors.
         log_clus_vars: tensor of shape (K, ) with cluster log of variance parameters.
 
     Outputs:
         tensor of shape (bs, l_dim) with generated samples.
     """
     # Get parameters from vectors
-    K, l_dim = clus_means.shape
+    K, l_dim = c_means.shape
     
     # Generate standard normal samples and apply transformation to obtain multivariate normal
-    stn_samples = torch.randn(size=[K, l_dim], device=clus_means.device)
-    mvn_samples = clus_means + torch.exp(0.5 * log_clus_vars).reshape(-1, 1) * stn_samples
+    stn_samples = torch.randn(size=[K, l_dim], device=c_means.device)
+    mvn_samples = c_means + torch.exp(0.5 * log_clus_vars).reshape(-1, 1) * stn_samples
 
     # Combine multivariate normal samples with cluster assignment probabilities
     samples = torch.matmul(pi_assign, mvn_samples)
@@ -96,12 +95,13 @@ class LSTM_Dec_v1(nn.Module):
 
         # Initialise parameters
         self.seq_len, self.h_dim = seq_len, hidden_dim
-        self.o_dim, self.i_dim = output_dim, output_dim      # Input and output dimensions are the same for this LSTMCell
+        self.i_dim, self.o_dim = output_dim, output_dim        # The output dim must match the input dim for the next time-step
         self.n_layers, self.dropout = num_layers, dropout
 
         # Define main LSTM layer and output layer
-        self.lstm_cell = LSTM(input_size=self.i_dim, hidden_size=self.h_dim, num_layers=self.n_layers, dropout=self.dropout, **kwargs)
-        self.fc_out = nn.Linear(self.h_dim, self.i_dim)
+        self.lstm_cell = LSTM(input_size=self.i_dim, hidden_size=self.h_dim, 
+                              num_layers=1, dropout=self.dropout, batch_first=True, **kwargs)
+        self.fc_out = nn.Linear(self.h_dim, self.o_dim)
 
     # Forward pass
     def forward(self, c_vector: torch.Tensor):
@@ -111,7 +111,8 @@ class LSTM_Dec_v1(nn.Module):
         Params:
         - c_vector: context vector of fixed dimensionality, of shape (N, D), where N is batch size and D is latent dimensionality.
         """
-        
+
+
         #  Get parameters
         bs, T = c_vector.shape[0], self.seq_len
 
@@ -125,14 +126,17 @@ class LSTM_Dec_v1(nn.Module):
         h_states[:, 0, :] = c_vector
 
         # Initialise iterates
-        i_t = torch.zeros(bs, self.i_dim).to(c_vector.device)
+        cur_input = torch.zeros(bs, self.i_dim).to(c_vector.device)
         h_t, c_t = c_vector, c_vector
         
         # Apply LSTM Cell to generate sequence
         for t in range(T):
 
             # Pass through LSTM cell and update input-cell-hidden states
-            h_t, c_t = self.lstm_cell(i_t, (h_t, c_t))
+            print("Current shape of input: ", cur_input.shape)
+            print("Current ht shape: ", h_t.shape)
+            print("Current ct shape: ", c_t.shape)
+            h_t, c_t = self.lstm_cell(cur_input, (h_t, c_t))
             o_t = self.fc_out(c_t)
 
             # Save states
@@ -140,11 +144,13 @@ class LSTM_Dec_v1(nn.Module):
             h_states[:, t, :] = h_t
             outputs[:, t, :] = o_t
 
+            # Update input at time step t+1
+            cur_input = o_t
+
         # Return cell and hidden states
         return h_states, c_states, outputs
-# endregion
 
-# region Define LSTM Decoder v2 (use context vector as input for multiple time steps)
+
 class LSTM_Dec_v2(nn.Module):
     """
     Implements LSTM Decoder architecture. A context vector of fixed dimension is given, and used as the sequence of input vectors for multiple time steps for the LSTM.
@@ -195,7 +201,7 @@ class LSTM_Dec_v2(nn.Module):
 
 
 # region DirVRNN
-class BaseModel(nn.Module):
+class DirVRNN(nn.Module):
     """ 
     Implements DirVRNN model as described in the paper.
 
@@ -273,7 +279,7 @@ class BaseModel(nn.Module):
         self.decoder = LSTM_Dec_v1(
             seq_len=self.w_size,
             output_dim=self.i_size + self.i_size, # output is concatenation of mean-log var of observation
-            hidden_dim=self.l_size,
+            hidden_dim=self.l_size + self.l_size,  # state cell has same size as context vector (feat_extr(z) and h)
             num_layers=1,
             dropout=0.0
         )
@@ -288,7 +294,7 @@ class BaseModel(nn.Module):
             bias=True,
             dropout=0.0                           # default dropout is 0 (no dropout)
         )
-        self.pred_out = nn.Sequential(
+        self.predictor_out = nn.Sequential(
             nn.Linear(self.gate_n, self.o_size),
             nn.Softmax(dim=-1)
         )                                     # output is o_size-dimensional vector of outcome probabilities
@@ -337,6 +343,8 @@ class BaseModel(nn.Module):
             nn.Linear(self.gate_n, self.l_size),
             nn.Tanh()
         )
+
+
     # Define training process for this class.
     def forward(self, x, y):
         """
@@ -349,24 +357,28 @@ class BaseModel(nn.Module):
 
         Output:
             - loss: pytorch Tensor object of loss value.
+            - history: dictionary of relevant training history.
         """
 
         # ========= Define relevant variables and initialise variables ===========
 
         # Extract dimensions
         batch_size, seq_len, input_size = x.size()
+        num_time_steps = int(seq_len / self.w_size)
 
         # Initialize the current hidden state as the null vector
         h = torch.zeros(batch_size, self.l_size).to(x.device)
 
         # Initialise probability of cluster assignment as uniform
         est_pi = torch.ones(batch_size, self.K) / self.K
-        est_z = gen_samples_from_assign(est_pi, self.clus_means, self.clus_log_vars)
+        est_z = gen_samples_from_assign(est_pi, self.c_means, self.log_c_vars)
                 
 
-        # Initialise loss value
-        loss = 0
-        num_time_steps = int(seq_len / self.w_size)
+        # Initialise loss value and history dictionary
+        ELBO, history = 0, {}
+        history["loss_loglik"] = torch.zeros(num_time_steps)
+        history["loss_kl"] = torch.zeros(num_time_steps)
+        history["loss_out"] = 0
 
         # ================== Iteration through time-steps ==============
         # Can also edit this to use a sliding window approach, where t goes from 0 to seq_len - w_size
@@ -377,12 +389,15 @@ class BaseModel(nn.Module):
             lower_t, higher_t = window_id * self.w_size, (window_id + 1) * self.w_size
 
             # First we estimate the observations for the incoming window given current cell state
-            h_dec, c_dec, output_pred = self.decoder(
-                torch.cat([
-                    self.phi_z(est_z),
+            test_output = torch.cat([
+                    self.z_feat_extr(est_z),
                     h
                 ], dim=-1)
-            )
+            print(test_output.shape)
+
+
+
+            h_dec, c_dec, output_pred = self.decoder_pass(h=h, z=est_z)
 
             # Decompose obvs_pred into mean and log-variance - shape is (bs, T, 2 * input_size)
             mu_g, logvar_g = torch.chunk(output_pred, chunks=2, dim=-1)
@@ -398,22 +413,15 @@ class BaseModel(nn.Module):
                 alpha_prior = self.prior_out(self.prior(h)) + eps 
 
                 # Compute alpha of encoder network
-                alpha_enc = self.enc_out(
-                    self.encoder(
-                        torch.cat([
-                            self.phi_x(x_t),  # Extract feature from x
-                            h
-                        ], dim=-1)  # Concatenate with cell state in last dimension
-                    ) 
-                ) + eps  # Add small value to avoid numerical instability
+                alpha_enc = self.encoder_pass(h=h, x=x_t)
 
 
                 # Sample cluster distribution from alpha_enc, and estimate samples from clusters
                 est_pi = sample_dir(alpha=alpha_enc)
                 est_z = gen_samples_from_assign(
                     pi_assign=est_pi, 
-                    clus_means=self.clus_means, 
-                    clus_log_vars=self.log_clus_vars
+                    c_means=self.c_means, 
+                    log_clus_vars=self.log_clus_vars
                 )
                 # pi = torch.divide(alpha_enc, torch.sum(alpha_enc, dim=-1, keepdim=True))
 
@@ -428,33 +436,35 @@ class BaseModel(nn.Module):
                 # kl_div = torch.mean(torch.sum(alpha_enc * quot, dim=-1))
 
                 # Add to loss tracker
-                loss += log_lik - kl_div
+                ELBO += log_lik - kl_div
 
 
                 # ----- UPDATE CELL STATE ------
-                h = self.state_out(
-                        self.state_update(
-                            torch.cat([
-                                self.phi_z(est_z),
-                                self.phi_x(x_t),
-                                h
-                            ], dim=-1)
-                        )
-                    )
+                h = self.update_state(h=h, x=x_t, z=est_z)
+
+                # Append to history trackers
+                history["loss_kl"][window_id] += torch.mean(kl_div, dim=0)
+                history["loss_loglik"][window_id] += torch.mean(log_lik, dim=0)
 
         # Once all times have been computed, make predictions on outcome
-        y_pred = self.pred_out(self.predictor(est_z))
+        y_pred = self.predictor_out(self.predictor(est_z))
 
         # Compute log loss of outcome
         pred_loss = losses.cat_cross_entropy(y_true=y, y_pred=y_pred)
 
         # Add to total loss
-        loss += pred_loss
+        ELBO += pred_loss
 
-        return (-1) * loss      # want to maximize loss, so return negative loss
+        # Compute average per batch
+        ELBO = torch.mean(ELBO, dim=0)
+
+        # Append to history tracker
+        history["loss_out"] += torch.mean(pred_loss)
+
+        return (-1) * ELBO, history      # want to maximize loss, so return negative loss
     
     
-    def train(self, data_info, train_info, run_config):
+    def fit(self, data_info, train_info, run_config):
         """
         Train model given data_dic with data information, and training parameters.
 
@@ -485,19 +495,13 @@ class BaseModel(nn.Module):
         # Define optimizer
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
 
-        # Define Weights and Biases Logger
-        wandb.init(dir=f"exps/Dir_VRNN/{data_name}", 
-                project="Dir_VRNN",
-                config=run_config
-            )
-
-
         # ================== TRAINING-VALIDATION LOOP ==================
         for epoch in range(1, epochs + 1):
 
             # Set model to train mode and initialize loss tracker
             self.train()
             train_loss = 0
+            history = {"loss_loglik": 0, "loss_kl": 0, "loss_out": 0}
 
             # Iterate through batches
             for batch_id, (x, y) in enumerate(train_loader):
@@ -514,6 +518,7 @@ class BaseModel(nn.Module):
 
                 # Add to loss tracker
                 train_loss += loss.item()
+                history = {history[key] + history_objects[key] for key in history.keys()}
 
                 # Print message
                 print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
@@ -521,18 +526,29 @@ class BaseModel(nn.Module):
                     end="\r")
                 
             # Print message at the end of epoch
-            print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
-                epoch, train_loss / len(self.train_loader), 100.))
+            log_lik = torch.mean(history_objects["loss_loglik"])
+            kl_div = torch.mean(history_objects["loss_kl"])
+            out_l = torch.mean(history_objects["loss_out"])
+
+            print("Train epoch {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
+                epoch, 100, 
+                train_loss, log_lik, kl_div, out_l))
+                
             
             # Log objects to Weights and Biases
             wandb.log({
-                "train_loss": train_loss,
+                "train/loss": train_loss,
+                "train/loglik": log_lik,
+                "train/kldiv": kl_div,
+                "train/out_l": out_l
+            })	
             
-
             # Check performance on validation set
-            self.predict(X_val, y_val)
+            _, _ = self.predict(X_val, y_val)
+
+        wandb.finish()
     
-    def predict(self, X, y):
+    def predict(self, X, y, epoch="test"):
         """
         Make Predictions on new data.
 
@@ -543,6 +559,7 @@ class BaseModel(nn.Module):
 
         # Set model to evaluation mode 
         self.eval()
+        iter_str = f"val epoch {epoch}" if isinstance(epoch, int) else "test"
 
         # Prepare Data
         test_data = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
@@ -550,14 +567,76 @@ class BaseModel(nn.Module):
 
         # Apply forward prediction
         with torch.inference_mode():
-            for X, y in test_data:
+            for X, y in test_loader:
                 
                 # Compute Loss
-                loss = self.forward(X, y)
+                test_loss, history_objects = self.forward(X, y)
+
+                # Append to tracker
+                log_lik = torch.mean(history_objects["loss_loglik"])
+                kl_div = torch.mean(history_objects["loss_kl"])
+                out_l = torch.mean(history_objects["loss_out"])
 
                 # Print message
-                print("Test Loss: {:.5f}".format(loss.item()))
+                print("Predict {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
+                    iter_str, 100, 
+                    test_loss, log_lik, kl_div, out_l)
+                )
+            
+                # Log objects to Weights and Biases
+                save_fd = "val" if isinstance(epoch, int) else "test"
+                wandb.log({
+                    f"{save_fd}/loss": test_loss,
+                    f"{save_fd}/loglik": log_lik,
+                    f"{save_fd}/kldiv": kl_div,
+                    f"{save_fd}/out_l": out_l
+                })	
+            
+                
+            
+            return test_loss, history_objects
+        
+    # Useful methods for model
+    def x_feat_extr(self, x):
+        return self.phi_x_out(self.phi_x(x))
+    
+    def z_feat_extr(self, z):
+        return self.phi_z_out(self.phi_z(z))
+    
+    def encoder_pass(self, h, x):
+        "Single pass of the encoder to obtain alpha param."
+        return self.enc_out(
+                    self.encoder(
+                        torch.cat([
+                            self.x_feat_extr(x), # Extract feature from x
+                            h
+                        ], dim=-1)  # Concatenate x with cell state in last dimension
+                    ) 
+                ) + eps  # Add small value to avoid numerical instability
 
-            return loss
+    def decoder_pass(self, h, z):
+        return self.decoder(
+                    torch.cat([
+                        self.z_feat_extr(z),  # Extract feature from z
+                        h
+                    ], dim=-1)  # Concatenate z with cell state in last dimension
+                ) 
+    
+    def update_state(self, h, x, z):
+        return self.state_out(            # Final layer of MLP gate
+                        self.state_update(
+                            torch.cat([
+                                self.z_feat_extr(z), # Extract feature from z
+                                self.x_feat_extr(x), # Extract feature from x
+                                h            # Previous cell state
+                            ], dim=-1) # Concatenate z with cell state in last dimension
+                        )
+                )
+    
+    def prior_pass(self, h):
+        return self.prior_out(self.prior(h))
+
+    def predictor_pass(self, z):
+        return self.predictor_out(self.predictor(z))
 # endregion
         
