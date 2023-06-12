@@ -12,7 +12,11 @@ import torch.nn as nn
 from torchvision.ops import MLP
 from torch.nn import LSTM
 
+from torch.utils.data import DataLoader, TensorDataset
+import wandb
+
 import src.models.loss_functions as losses
+import src.models.general_utils as utils
 
 
 # region ========== DEFINE AUXILIARY FUNCTIONS ==========
@@ -448,5 +452,112 @@ class BaseModel(nn.Module):
         loss += pred_loss
 
         return (-1) * loss      # want to maximize loss, so return negative loss
+    
+    
+    def train(self, data_info, train_info, run_config):
+        """
+        Train model given data_dic with data information, and training parameters.
+
+        Params:
+            - data_info: dictionary with data information. Includes keys:
+                a) 'X' - with triple (X_train, X_val, X_test) of observation data;
+                b) 'y' - with triple (y_train, y_val, y_test) of outcome data;
+                c) 
+            - train_info: dictionary with training information. Includes keys:
+                a) 'batch_size' - batch size for training;
+                b) 'num_epochs' - number of epochs to train for;
+                c) 'lr' - learning rate for training;
+            - run_config: parameters used for loading data, model and training.
+        """
+
+        # Unpack data and make data loaders
+        X_train, X_val, _ = data_info['X']
+        y_train, y_val, _ = data_info['y']
+
+        # Unpack train parameters
+        batch_size, epochs, lr = train_info['batch_size'], train_info['num_epochs'], train_info['lr']
+        data_name = data_info['data_load_config']['data_name']
+
+        # Prepare data for training
+        train_dataset = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+        # Define optimizer
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+
+        # Define Weights and Biases Logger
+        wandb.init(dir=f"exps/Dir_VRNN/{data_name}", 
+                project="Dir_VRNN",
+                config=run_config
+            )
+
+
+        # ================== TRAINING-VALIDATION LOOP ==================
+        for epoch in range(1, epochs + 1):
+
+            # Set model to train mode and initialize loss tracker
+            self.train()
+            train_loss = 0
+
+            # Iterate through batches
+            for batch_id, (x, y) in enumerate(train_loader):
+
+                # Zero out gradients for each batch
+                optimizer.zero_grad()
+
+                # Compute Loss for single model pass
+                loss, history_objects = self.forward(x, y)
+
+                # Back-propagate loss and update weights
+                loss.backward()
+                optimizer.step()
+
+                # Add to loss tracker
+                train_loss += loss.item()
+
+                # Print message
+                print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
+                    epoch, loss.item(), 100. * batch_id / len(self.train_loader)),
+                    end="\r")
+                
+            # Print message at the end of epoch
+            print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
+                epoch, train_loss / len(self.train_loader), 100.))
+            
+            # Log objects to Weights and Biases
+            wandb.log({
+                "train_loss": train_loss,
+            
+
+            # Check performance on validation set
+            self.predict(X_val, y_val)
+    
+    def predict(self, X, y):
+        """
+        Make Predictions on new data.
+
+        Params:
+            - X: input data of shape (bs, T, input_size)
+            - y: outcome data of shape (bs, output_size)
+        """
+
+        # Set model to evaluation mode 
+        self.eval()
+
+        # Prepare Data
+        test_data = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
+        test_loader = DataLoader(test_data, batch_size=X.shape[0], shuffle=False)
+
+        # Apply forward prediction
+        with torch.inference_mode():
+            for X, y in test_data:
+                
+                # Compute Loss
+                loss = self.forward(X, y)
+
+                # Print message
+                print("Test Loss: {:.5f}".format(loss.item()))
+
+            return loss
 # endregion
         

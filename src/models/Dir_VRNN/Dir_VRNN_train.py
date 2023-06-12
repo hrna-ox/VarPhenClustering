@@ -106,7 +106,7 @@ class DirVRNN(BaseModel):
         # Iterate through epochs
         for epoch in range(1, num_epochs + 1):
             train_loss = self._single_epoch_train(epoch)
-            val_loss = self._single_epoch_val(epoch)
+            val_loss, val_history = self._single_epoch_val(epoch)
 
             # Save results to Writer
             self.writer.add_scalars("Training vs Validation Loss",
