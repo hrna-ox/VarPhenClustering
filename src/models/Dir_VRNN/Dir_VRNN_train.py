@@ -39,7 +39,7 @@ def main():
     wandb.init(entity="hrna-ox", dir=f"exps/Dir_VRNN/{data_config['data_name']}",
                 project="Dir_VRNN", config=run_config)
     
-"""     # Load and process data
+    # Load and process data
     data_info = data_loader(**data_config)
 
     # Get model
@@ -56,7 +56,7 @@ def main():
 
     # Run on Test data
     model.eval()
-    model.predict(X_test, y_test, epoch="test") """
+    model.predict(X_test, y_test, epoch="test")
 
 # endregion
 

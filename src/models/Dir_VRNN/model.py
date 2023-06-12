@@ -8,14 +8,13 @@ Model file to define GC-DaPh class.
 # ============= IMPORT LIBRARIES ==============
 import torch
 import torch.nn as nn
-
-from torchvision.ops import MLP
-from torch.nn import LSTM
-
-from torch.utils.data import DataLoader, TensorDataset
 import wandb
 
+from torch.nn import LSTMCell
+from torch.utils.data import DataLoader, TensorDataset
+
 import src.models.loss_functions as losses
+from src.models.deep_learning_base_classes import MLP
 
 
 # region ========== DEFINE AUXILIARY FUNCTIONS ==========
@@ -99,8 +98,7 @@ class LSTM_Dec_v1(nn.Module):
         self.n_layers, self.dropout = num_layers, dropout
 
         # Define main LSTM layer and output layer
-        self.lstm_cell = LSTM(input_size=self.i_dim, hidden_size=self.h_dim, 
-                              num_layers=1, dropout=self.dropout, batch_first=True, **kwargs)
+        self.lstm_cell = LSTMCell(input_size=self.i_dim, hidden_size=self.h_dim, bias=True)
         self.fc_out = nn.Linear(self.h_dim, self.o_dim)
 
     # Forward pass
@@ -133,9 +131,6 @@ class LSTM_Dec_v1(nn.Module):
         for t in range(T):
 
             # Pass through LSTM cell and update input-cell-hidden states
-            print("Current shape of input: ", cur_input.shape)
-            print("Current ht shape: ", h_t.shape)
-            print("Current ct shape: ", c_t.shape)
             h_t, c_t = self.lstm_cell(cur_input, (h_t, c_t))
             o_t = self.fc_out(c_t)
 
@@ -173,7 +168,7 @@ class LSTM_Dec_v2(nn.Module):
         self.n_layers, self.dropout = num_layers, dropout
 
         # Define main LSTM layer and output layer
-        self.lstm = LSTM(input_size=self.i_dim, hidden_dim=self.h_dim, num_layers=self.n_layers, dropout=self.dropout, **kwargs)
+        self.lstm = LSTMCell(input_size=self.i_dim, hidden_dim=self.h_dim, num_layers=self.n_layers, dropout=self.dropout, **kwargs)
         self.fc_out = nn.Linear(self.h_dim, self.o_dim)  
 
     # Forward pass
@@ -219,6 +214,8 @@ class DirVRNN(nn.Module):
                 l_size: int = 10,
                 gate_hidden_l: int = 2,
                 gate_hidden_n: int = 20,
+                bias: bool = True,
+                dropout: float = 0.0,
                 **kwargs):
         """
         Object initialization.
@@ -231,6 +228,8 @@ class DirVRNN(nn.Module):
             - l_size: dimensionality of latent space (default = 10).
             - gate_hidden_l: number of hidden layers for gate networks (default = 2).
             - gate_hidden_n: number of nodes of hidden layers for gate networks (default = 20).
+            - bias: whether to include bias terms in MLPs (default = True).
+            - dropout: dropout rate for MLPs (default = 0.0, i.e. no dropout).
             - kwargs: additional arguments for compatibility.
         """
         super().__init__()
@@ -247,33 +246,27 @@ class DirVRNN(nn.Module):
 
         # Initialise encoder block - estimate alpha parameter of Dirichlet distribution given h and extracted input data features.
         self.encoder = MLP(
-            in_channels= self.l_size + self.l_size,      # input: concat(h, extr(x))
-            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
-            norm_layer=None,
-            activation_layer=nn.ReLU,             # default activation function is ReLU
-            inplace=True,
-            bias=True,
-            dropout=0.0                           # default dropout is 0 (no dropout)
+            input_size = self.l_size + self.l_size,      # input: concat(h, extr(x)) 
+            output_size = self.K,                        # output: K-dimensional vector of cluster probabilities
+            hidden_layers = self.gate_l,                 # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes = self.gate_n,                  # gate_n nodes per hidden layer
+            act_fn = nn.ReLU(),                          # default activation function is ReLU
+            bias = bias,
+            dropout = dropout
         )
-        self.enc_out = nn.Sequential(
-            nn.Linear(self.gate_n, self.K),
-            nn.Softmax(dim=-1)
-        )                                # output is K-dimensional vector of cluster probabilities
+        self.enc_out = nn.Softmax(dim=-1)               # output is a probability distribution over clusters
 
         # Initialise Prior Block - estimate alpha parameter of Dirichlet distribution given h.
         self.prior = MLP(
-            in_channels=self.l_size,               # input: h
-            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
-            norm_layer=None,
-            activation_layer=nn.ReLU,             # default activation function is ReLU
-            inplace=True,
-            bias=True,
-            dropout=0.0                           # default dropout is 0 (no dropout)
+            input_size = self.l_size,                    # input: h
+            output_size = self.K,                        # output: K-dimensional vector of cluster probabilities
+            hidden_layers = self.gate_l,                 # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes = self.gate_n,                  # gate_n nodes per hidden layer
+            act_fn = nn.ReLU(),                          # default activation function is ReLU
+            bias = bias,
+            dropout = dropout
         )
-        self.prior_out = nn.Sequential(
-            nn.Linear(self.gate_n, self.K),
-            nn.Softmax(dim=-1)
-        )
+        self.prior_out = nn.Softmax(dim=-1)             # output is a probability distribution over clusters
         
         # Initialise decoder block - given z, h, we generate a w_size sequence of observations, x.
         self.decoder = LSTM_Dec_v1(
@@ -281,68 +274,56 @@ class DirVRNN(nn.Module):
             output_dim=self.i_size + self.i_size, # output is concatenation of mean-log var of observation
             hidden_dim=self.l_size + self.l_size,  # state cell has same size as context vector (feat_extr(z) and h)
             num_layers=1,
-            dropout=0.0
+            dropout=dropout
         )
 
         # Define the output network - computes outcome prediction given predicted cluster assignments
         self.predictor = MLP(
-            in_channels=self.l_size,               # input: h
-            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
-            norm_layer=None,
-            activation_layer=nn.ReLU,             # default activation function is ReLU
-            inplace=True,
-            bias=True,
-            dropout=0.0                           # default dropout is 0 (no dropout)
+            input_size = self.l_size,                    # input: h
+            output_size = self.o_size,                   # output: o_size-dimensional vector of outcome probabilities
+            hidden_layers = self.gate_l,                 # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes = self.gate_n,                  # gate_n nodes per hidden layer
+            act_fn = nn.ReLU(),                          # default activation function is ReLU
+            bias = bias,
+            dropout = dropout
         )
-        self.predictor_out = nn.Sequential(
-            nn.Linear(self.gate_n, self.o_size),
-            nn.Softmax(dim=-1)
-        )                                     # output is o_size-dimensional vector of outcome probabilities
+        self.predictor_out = nn.Softmax(dim=-1)          # output is o_size-dimensional vector of outcome probabilities
         
 
         # Define feature transformation functions
         self.phi_x = MLP(
-            in_channels=self.i_size,               # input: x
-            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
-            norm_layer=None,
-            activation_layer=nn.ReLU,             # default activation function is ReLU
-            inplace=True,
-            bias=True,
-            dropout=0.0                           # default dropout is 0 (no dropout)
+            input_size = self.i_size,                    # input: x
+            output_size = self.l_size,                   # output: l_size-dimensional vector of latent space features
+            hidden_layers = self.gate_l,                 # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes = self.gate_n,                  # gate_n nodes per hidden layer
+            act_fn=nn.ReLU(),                            # default activation function is ReLU
+            bias=bias,                                   # default bias is True
+            dropout=dropout
         )
-        self.phi_x_out = nn.Sequential(
-            nn.Linear(self.gate_n, self.l_size),
-            nn.Tanh()
-        )                                  # output is l_size-dimensional vector of latent space features
+        self.phi_x_out = nn.Tanh()                       # output is l_size-dimensional vector of latent space features
 
         self.phi_z = MLP(
-            in_channels=self.l_size,               # input: z
-            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
-            norm_layer=None,
-            activation_layer=nn.ReLU,             # default activation function is ReLU
-            inplace=True,
-            bias=True,
-            dropout=0.0                           # default dropout is 0 (no dropout)
+            input_size = self.l_size,                    # input: z
+            output_size = self.l_size,                   # output: l_size-dimensional vector of latent space features
+            hidden_layers = self.gate_l,                 # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes = self.gate_n,                  # gate_n nodes per hidden layer
+            act_fn=nn.ReLU(),                            # default activation function is ReLU
+            bias=bias,                                   # default bias is True
+            dropout=dropout
         )
-        self.phi_z_out = nn.Sequential(
-            nn.Linear(self.gate_n, self.l_size),
-            nn.Tanh()
-        )                                    # output is l_size-dimensional vector of latent space features
+        self.phi_z_out = nn.Tanh()                       # output is l_size-dimensional vector of latent space features
 
         # Define Cell Update Gate Functions
-        self.state_update = MLP(
-            in_channels=self.l_size + self.l_size + self.l_size, # input: concat(h, phi_x, phi_z)
-            hidden_channels=[self.gate_n] * self.gate_l, # gate_l hidden_layers with gate_n nodes each
-            norm_layer=None,
-            activation_layer=nn.ReLU,             # default activation function is ReLU
-            inplace=True,
-            bias=True,
-            dropout=0.0                           # default dropout is 0 (no dropout)
+        self.cell_update = MLP(
+            input_size=self.l_size + self.l_size + self.l_size, # input: concat(h, phi_x, phi_z)
+            output_size=self.l_size,                            # output: l_size-dimensional vector of cell state updates
+            hidden_layers=self.gate_l,                          # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes=self.gate_n,                           # gate_n nodes per hidden layer
+            act_fn=nn.ReLU(),                                   # default activation function is ReLU
+            bias=bias,                                          # default bias is True
+            dropout=dropout
         )
-        self.state_out = nn.Sequential(
-            nn.Linear(self.gate_n, self.l_size),
-            nn.Tanh()
-        )
+        self.state_out = nn.Tanh()
 
 
     # Define training process for this class.
@@ -389,18 +370,10 @@ class DirVRNN(nn.Module):
             lower_t, higher_t = window_id * self.w_size, (window_id + 1) * self.w_size
 
             # First we estimate the observations for the incoming window given current cell state
-            test_output = torch.cat([
-                    self.z_feat_extr(est_z),
-                    h
-                ], dim=-1)
-            print(test_output.shape)
-
-
-
-            h_dec, c_dec, output_pred = self.decoder_pass(h=h, z=est_z)
+            h_dec, c_dec, data_gen = self.decoder_pass(h=h, z=est_z)
 
             # Decompose obvs_pred into mean and log-variance - shape is (bs, T, 2 * input_size)
-            mu_g, logvar_g = torch.chunk(output_pred, chunks=2, dim=-1)
+            mu_g, logvar_g = torch.chunk(data_gen, chunks=2, dim=-1)
             var_g = torch.exp(logvar_g) + eps
 
             for _w_id, t in enumerate(range(lower_t, higher_t)):
@@ -413,6 +386,9 @@ class DirVRNN(nn.Module):
                 alpha_prior = self.prior_out(self.prior(h)) + eps 
 
                 # Compute alpha of encoder network
+                print("h current shape: ", h.shape)
+                print("x_t current shape: ", x_t.shape)
+
                 alpha_enc = self.encoder_pass(h=h, x=x_t)
 
 
@@ -598,6 +574,8 @@ class DirVRNN(nn.Module):
         
     # Useful methods for model
     def x_feat_extr(self, x):
+        print("x shape is: ", x.shape)
+        print("phi_x shape is: ", self.phi_x(x).shape)
         return self.phi_x_out(self.phi_x(x))
     
     def z_feat_extr(self, z):
