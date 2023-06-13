@@ -1,4 +1,5 @@
 {
+   "run_name": "test",
    "data_config": {
       "data_name": "MIMIC",
       "target_window": 48,
@@ -9,7 +10,7 @@
       "seed": 2323
    },
    "model_config": {
-      "i_size": 10, 
+      "i_size": 9, 
       "o_size": 4, 
       "w_size": 3,
       "K": 10, 

@@ -84,8 +84,8 @@ class MLP(nn.Module):
 
             # Apply layer transformation
             inter_x = layer_i(_x)                # Layer defines map
-            _x= self.act_fn(inter_x)
-            _x = self.dropout(_x)
+            inter_x= self.act_fn(inter_x)
+            _x = self.dropout(inter_x)
 
         # Output Layer is the last layer
         output = self.nn_layers[-1](_x)

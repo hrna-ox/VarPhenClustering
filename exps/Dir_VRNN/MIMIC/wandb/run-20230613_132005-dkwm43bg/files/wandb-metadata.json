@@ -1,0 +1,88 @@
+{
+    "os": "Linux-5.4.0-149-generic-x86_64-with-glibc2.27",
+    "python": "3.10.0",
+    "heartbeatAt": "2023-06-13T12:20:05.970023",
+    "startedAt": "2023-06-13T12:20:05.307318",
+    "docker": null,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "-m src.models.Dir_VRNN.Dir_VRNN_train",
+    "git": {
+        "remote": "https://github.com/hrna-ox/VarPhenClustering.git",
+        "commit": "91a531273c46164e617c73e944c55daf6e403cbb"
+    },
+    "email": "henrique.aguiar@eng.ox.ac.uk",
+    "root": "/home/ball4537/PycharmProjects/VarPhenClustering",
+    "host": "engs-28454",
+    "username": "ball4537",
+    "executable": "/home/ball4537/PycharmProjects/VarPhenClustering/venv/bin/python",
+    "cpu_count": 4,
+    "cpu_count_logical": 8,
+    "cpu_freq": {
+        "current": 2006.5755,
+        "min": 1200.0,
+        "max": 3900.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 1856.726,
+            "min": 1200.0,
+            "max": 3900.0
+        },
+        {
+            "current": 3700.011,
+            "min": 1200.0,
+            "max": 3900.0
+        },
+        {
+            "current": 1200.003,
+            "min": 1200.0,
+            "max": 3900.0
+        },
+        {
+            "current": 1200.001,
+            "min": 1200.0,
+            "max": 3900.0
+        },
+        {
+            "current": 1995.865,
+            "min": 1200.0,
+            "max": 3900.0
+        },
+        {
+            "current": 3700.0,
+            "min": 1200.0,
+            "max": 3900.0
+        },
+        {
+            "current": 1199.999,
+            "min": 1200.0,
+            "max": 3900.0
+        },
+        {
+            "current": 1199.999,
+            "min": 1200.0,
+            "max": 3900.0
+        }
+    ],
+    "disk": {
+        "total": 466.2383117675781,
+        "used": 348.61021423339844
+    },
+    "gpu": "NVIDIA GeForce RTX 3060",
+    "gpu_count": 2,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce RTX 3060",
+            "memory_total": 12884901888
+        },
+        {
+            "name": "Quadro P400",
+            "memory_total": 2147483648
+        }
+    ],
+    "memory": {
+        "total": 31.054920196533203
+    }
+}
