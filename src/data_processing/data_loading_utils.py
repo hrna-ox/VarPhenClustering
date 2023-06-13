@@ -205,7 +205,7 @@ def _load(data_name, window=4):
 
         # Load Data
         X = pd.read_csv(data_fd + "vitals_process.csv", parse_dates=MIMIC_PARSE_TIME_VARS, header=0, index_col=0)
-        y = pd.read_csv(data_fd + f"outcomes_{window}h_process.csv", index_col=0)
+        y = pd.read_csv(data_fd + f"outcomes_{window}_process.csv", index_col=0)
 
         # Convert columns to timedelta
         X = convert_to_timedelta(X, *MIMIC_PARSE_TD_VARS)

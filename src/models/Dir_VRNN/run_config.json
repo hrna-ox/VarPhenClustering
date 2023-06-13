@@ -1,0 +1,26 @@
+{
+   "data_config": {
+      "data_name": "MIMIC",
+      "target_window": 48,
+      "feat_set": "vit-sta",
+      "time_range": [0, 10],
+      "train_test_ratio": 0.6,
+      "train_val_ratio": 0.4,
+      "seed": 2323
+   },
+   "model_config": {
+      "i_size": 10, 
+      "o_size": 4, 
+      "w_size": 3,
+      "K": 10, 
+      "l_size": 16,
+      "gate_hidden_l": 2,
+      "gate_hidden_n": 20,
+      "seed": 2323
+   },
+   "training_config": {
+      "lr": 0.001,
+      "num_epochs": 5,
+      "batch_size": 128
+   }
+}

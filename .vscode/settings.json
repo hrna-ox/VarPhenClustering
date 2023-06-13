@@ -12,6 +12,21 @@
         "intime",
         "OBSERVS",
         "obvs",
-        "outtime"
+        "outtime",
+        "careunit",
+        "charttime",
+        "clus",
+        "deathtime",
+        "dischtime",
+        "extr",
+        "heartrate",
+        "intime",
+        "logvar",
+        "nvarg",
+        "outtime",
+        "outtimes",
+        "relu",
+        "resprate",
+        "VRNN"
     ]
 }
