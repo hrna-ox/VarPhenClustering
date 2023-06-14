@@ -11,7 +11,7 @@ import torch.nn as nn
 import wandb
 
 from torch.nn import LSTMCell
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, RandomSampler
 
 import src.models.losses_and_metrics as LM_utils
 from src.models.deep_learning_base_classes import MLP
@@ -464,7 +464,7 @@ class DirVRNN(nn.Module):
 
         # Prepare data for training
         train_dataset = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, sampler=RandomSampler)
 
         # Define optimizer
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
@@ -622,9 +622,12 @@ class DirVRNN(nn.Module):
         # Sample from the generated mu_g and var_g
         history_objects["x_samples"] = model_utils.gen_diagonal_mvn(mugs, log_vargs)
 
+        # Convert to right format
+        
+
         # Log to wandb
         wandb.log({
-            "":""
+            "test/prob_phens": 
         })
 
         return history_objects
