@@ -57,10 +57,11 @@ def main():
     print("\n\nRunning model on test data...\n\n")
 
     # Prepare Test Data
-    X_test, y_test = data_info["X"][-1], data_info["y"][-1]
+    X_test = torch.Tensor(data_info["X"][-1], device=device)
+    y_test = torch.Tensor(data_info["y"][-1], device=device)
 
     model.eval()
-    model.predict(X_test, y_test)
+    output_dic = model.predict(X_test, y_test)
 
     # Finish recording session
     wandb.finish()

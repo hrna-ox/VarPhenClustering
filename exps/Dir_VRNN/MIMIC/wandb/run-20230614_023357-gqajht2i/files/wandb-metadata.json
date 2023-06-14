@@ -1,0 +1,49 @@
+{
+    "os": "Windows-10-10.0.22621-SP0",
+    "python": "3.9.0",
+    "heartbeatAt": "2023-06-14T01:33:59.698139",
+    "startedAt": "2023-06-14T01:33:57.287291",
+    "docker": null,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "-m src.models.Dir_VRNN.Dir_VRNN_train",
+    "git": {
+        "remote": "https://github.com/hrna-ox/VarPhenClustering.git",
+        "commit": "2e49b55bd55bdf22d3c85c85ad4027d569ecb931"
+    },
+    "email": "henrique.aguiar@eng.ox.ac.uk",
+    "root": "C:/Users/hruia/PycharmProjects/VarPhenClustering",
+    "host": "DESKTOP-MUH03CH",
+    "username": "hruia",
+    "executable": "C:\\Users\\hruia\\Anaconda3\\envs\\deeplearning\\python.exe",
+    "cpu_count": 4,
+    "cpu_count_logical": 8,
+    "cpu_freq": {
+        "current": 1508.0,
+        "min": 0.0,
+        "max": 2112.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 1508.0,
+            "min": 0.0,
+            "max": 2112.0
+        }
+    ],
+    "disk": {
+        "total": 474.75292587280273,
+        "used": 414.7104682922363
+    },
+    "gpu": "GeForce GTX 1050",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "GeForce GTX 1050",
+            "memory_total": 2147483648
+        }
+    ],
+    "memory": {
+        "total": 15.918956756591797
+    }
+}

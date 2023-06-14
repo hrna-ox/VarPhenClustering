@@ -166,6 +166,7 @@ class DirVRNN(nn.Module):
                 bias: bool = True,
                 dropout: float = 0.0,
                 device: str = 'cpu',
+                seed: int = 42,
                 **kwargs):
         """
         Object initialization.
@@ -181,6 +182,7 @@ class DirVRNN(nn.Module):
             - bias: whether to include bias terms in MLPs (default = True).
             - dropout: dropout rate for MLPs (default = 0.0, i.e. no dropout).
             - device: device to use for computations (default = 'cpu').
+            - seed: random seed for reproducibility (default = 42).
             - kwargs: additional arguments for compatibility.
         """
         super().__init__()
@@ -189,7 +191,7 @@ class DirVRNN(nn.Module):
         self.i_size, self.o_size, self.w_size = i_size, o_size, w_size
         self.K, self.l_size = K, l_size
         self.gate_l, self.gate_n = gate_hidden_l, gate_hidden_n
-        self.device = device
+        self.device, self.seed = device, seed
 
         # Parameters for Clusters
         self.c_means = nn.Parameter(
@@ -338,7 +340,7 @@ class DirVRNN(nn.Module):
         history["zs"] = torch.zeros(batch_size, seq_len, self.l_size, device=self.device)
         history["alpha_encs"] = torch.zeros(batch_size, seq_len, self.K, device=self.device)
         history["mugs"] = torch.zeros(batch_size, seq_len, self.i_size, device=self.device)
-        history["vargs"] = torch.zeros(batch_size, seq_len, self.i_size, device=self.device)
+        history["log_vargs"] = torch.zeros(batch_size, seq_len, self.i_size, device=self.device)
 
         # ================== Iteration through time-steps ==============
         # Can also edit this to use a sliding window approach, where t goes from 0 to seq_len - w_size
@@ -502,8 +504,8 @@ class DirVRNN(nn.Module):
                     end="\r")
                 
             # Print message at the end of epoch
-            epoch_loglik = torch.mean(train_loglik)
-            epoch_kl = torch.mean(train_kl)
+            epoch_loglik = torch.sum(train_loglik)
+            epoch_kl = torch.sum(train_kl)
             epoch_out = torch.mean(train_out)
 
             print("Train epoch {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
@@ -523,7 +525,7 @@ class DirVRNN(nn.Module):
         )	
             
             # Check performance on validation set
-            _, _ = self.evaluate(X_val, y_val, epoch=epoch)
+            _, _ = self.validate(X_val, y_val, epoch=epoch)
     
     def validate(self, X, y, epoch: int):
         """
@@ -562,21 +564,43 @@ class DirVRNN(nn.Module):
                 )
 
                 # Compute useful metrics and plots during training - including:
-                # a) cluster assignment distribution, b) cluster means separability, c) accuracy, f1 and recall scores, d) confusion matrix, e) cluster separability metrics
+                # a) cluster assignment distribution, 
+                # b) cluster means separability, 
+                # c) accuracy, f1 and recall scores,
+                # d) confusion matrix, 
 
                 # Compute distribution over cluster memberships at this time step.
                 "TO DO"
 
                 # Compute cluster means separability
-                
+                avg_clus_dist = model_utils.torch_clus_means_separability(clus_means=self.c_means)
+                #tsne_projs = model_utils.torch_clus_mean_2D_tsneproj(clus_means=self.c_means, seed=self.seed)
+                #tsne_to_fmt = wandb.Table(data=tsne_projs, columns=["tsne dim 1", "tsne dim 2"])
+
+                # Compute accuracy, f1 and recall scores
+                y_pred = history_objects["y_preds"]
+                acc = LM_utils.accuracy_score(y, y_pred)
+                macro_f1 = LM_utils.f1_multiclass(y, y_pred, mode="macro")
+                micro_f1 = LM_utils.f1_multiclass(y, y_pred, mode="micro")
+
+                # Compute confusion matrix, ROC and PR curves
+                pr_curve = wandb.plot.pr_curve(torch.argmax(y,dim=-1), y_pred, labels=["A", "B", "C", "D"])
+                roc_curve = wandb.plot.roc_curve(torch.argmax(y, dim=-1), y_pred, labels=["A", "B", "C", "D"])
             
                 # Log objects to Weights and Biases
                 wandb.log({
-                        f"{epoch}/epoch": epoch + 1,
-                        f"{epoch}/loss": val_loss,
-                        f"{epoch}/loglik": log_lik,
-                        f"{epoch}/kldiv": kl_div,
-                        f"{epoch}/out_l": out_l
+                        "val/epoch": epoch + 1,
+                        "val/loss": val_loss,
+                        "val/loglik": log_lik,
+                        "val/kldiv": kl_div,
+                        "val/out_l": out_l,
+                        "val/avg_clus_dist": avg_clus_dist,
+                        #f"{epoch}/tsne_projs": wandb.plot(tsne_to_fmt, "dim 1", "dim 2", title="Cluster Means TSNE Projection"),
+                        "val/acc": acc,
+                        "val/macro_f1": macro_f1,
+                        "val/micro_f1": micro_f1,
+                        "val/Precision_Recall": pr_curve,
+                        "val/Receiver_Operating_Char": roc_curve
                     },
                     step=epoch+1
                 )	        

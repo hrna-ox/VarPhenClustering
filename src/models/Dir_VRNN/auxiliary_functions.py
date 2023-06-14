@@ -11,7 +11,6 @@ intermediate object analysis.
 import torch
 from torch.nn.functional import one_hot
 
-import matplotlib.pyplot as plt
 from tsnecuda import TSNE
 
 # endregion
@@ -83,11 +82,11 @@ def gen_diagonal_mvn(mu_g: torch.Tensor, log_var_g: torch.Tensor) -> torch.Tenso
     """
 
     # Get parameters
-    N, dim = mu_g.shape
+    N, T, dim = mu_g.shape
 
     # Generate standard normal samples and apply transformation to obtain multivariate normal
-    stn_samples = torch.randn(size=[N, dim], device=mu_g.device)
-    mvn_samples = mu_g + torch.exp(log_var_g) * stn_samples
+    stn_samples = torch.randn(size=[N, T, dim], device=mu_g.device)
+    mvn_samples = mu_g + torch.exp(0.5 * log_var_g) * stn_samples
 
     return mvn_samples
 # endregion
@@ -165,8 +164,8 @@ def torch_get_temp_phens(pis_assign: torch.Tensor, y_true: torch.Tensor, mode: s
     print(f"Computing phenotypes using mode '{mode}'.")
 
     # Get params
-    N, T, K = pis_assign.size()
-    O = y_true.size(1)
+    N, T, K = pis_assign.shape
+    _, O = y_true.shape
 
     # Initialise output 
     phens = torch.zeros((K, T, O), device=pis_assign.device)
@@ -204,7 +203,7 @@ def torch_clus_means_separability(clus_means: torch.Tensor) -> torch.Tensor():
 
     return avg_dist
 
-def torch_clus_mean_2D_plot(clus_means: torch.Tensor, seed: int) -> torch.Tensor():
+def torch_clus_mean_2D_tsneproj(clus_means: torch.Tensor, seed: int) -> torch.Tensor():
     """Get 2D TSNE plot of cluster means.
 
     Args:
@@ -212,20 +211,17 @@ def torch_clus_mean_2D_plot(clus_means: torch.Tensor, seed: int) -> torch.Tensor
         seed (int): random seed for reproducibility.
 
     Outputs:
-        plt.figure: with 2D TSNE plot of cluster means.
-    """
-    fig, ax = plt.subplots()
+        clus_reps: of shape (K, 2) with 2D TSNE plot of cluster means.
+    """ 
 
-    # Get TSNE plot
-    tsne = TSNE(n_components=2, random_state=seed, verbose=0, n_jobs=-1)
+    # Get TSNE object
+    tsne = TSNE(n_components=2, random_seed=seed, verbose=0)
+
+    # Apply tsne transform
     clus_reps = tsne.fit_transform(clus_means)
 
-    #######
-    CNA WE PLOT DIRECTLY INSTEAD OF CONVERTING PYTORCH TENSORS TO MATPLOTLIB?
-
-
     # Return figure
-    return fig
+    return clus_reps
 
 
 # endregion
