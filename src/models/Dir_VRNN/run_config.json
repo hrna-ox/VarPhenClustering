@@ -10,6 +10,7 @@
       "seed": 2323
    },
    "model_config": {
+      "model_name": "DirVRNN",
       "i_size": 9, 
       "o_size": 4, 
       "w_size": 3,

@@ -10,138 +10,14 @@ import torch
 import torch.nn as nn
 import wandb
 
-from torch.nn import LSTMCell
+from typing import Tuple, Dict
 from torch.utils.data import DataLoader, TensorDataset, RandomSampler
 
 import src.models.losses_and_metrics as LM_utils
-from src.models.deep_learning_base_classes import MLP
+from src.models.deep_learning_base_classes import MLP, LSTM_Dec_v1, LSTM_Dec_v2
 
 import src.models.Dir_VRNN.auxiliary_functions as model_utils
 from src.models.Dir_VRNN.auxiliary_functions import eps
-
-
-
-# region Define LSTM Decoder v1 (use output at time t as input at time t+1)
-class LSTM_Dec_v1(nn.Module):
-    """
-    Implements LSTM Decoder architecture. A context vector of fixed dimension is given as input to the hidden/cell state of the decoder, and the first input is a vector
-    of zeros. At each time-step the output of the LSTM is used as input for the next time-step.
-    """
-    def __init__(self,
-        seq_len: int,     # Number of observations to generate
-        output_dim: int,   # Dimensionality of output vectors
-        hidden_dim: int,  # Dimensionality of hidden state
-        num_layers: int = 1,  # Number of layers (default = 1)
-        dropout: float = 0.0, # Dropout rate (default = 0.0, i.e. no dropout)
-        **kwargs): 
-        """
-        Object initialization given input parameters.
-        """
-
-        # Call parent class constructor
-        super().__init__()
-
-        # Initialise parameters
-        self.seq_len, self.h_dim = seq_len, hidden_dim
-        self.i_dim, self.o_dim = output_dim, output_dim        # The output dim must match the input dim for the next time-step
-        self.n_layers, self.dropout = num_layers, dropout
-
-        # Define main LSTM layer and output layer
-        self.lstm_cell = LSTMCell(input_size=self.i_dim, hidden_size=self.h_dim, bias=True)
-        self.fc_out = nn.Linear(self.h_dim, self.o_dim)
-
-    # Forward pass
-    def forward(self, c_vector: torch.Tensor):
-        """
-        Forward pass of LSTM Decoder. Given a context vector, initialise cell and hidden states of LSTM decoder. Pass zero as first input vector of sequence.
-
-        Params:
-        - c_vector: context vector of fixed dimensionality, of shape (N, D), where N is batch size and D is latent dimensionality.
-        """
-
-
-        #  Get parameters
-        bs, T = c_vector.shape[0], self.seq_len
-
-        # Define trackers for cell and hidden states.
-        c_states = torch.zeros(bs, T, self.h_dim).to(c_vector.device)
-        h_states = torch.zeros(bs, T, self.h_dim).to(c_vector.device)
-        outputs = torch.zeros(bs, T, self.o_dim).to(c_vector.device)
-
-        # Set values at time 0
-        c_states[:, 0, :] = c_vector
-        h_states[:, 0, :] = c_vector
-
-        # Initialise iterates
-        cur_input = torch.zeros(bs, self.i_dim).to(c_vector.device)
-        h_t, c_t = c_vector, c_vector
-        
-        # Apply LSTM Cell to generate sequence
-        for t in range(T):
-
-            # Pass through LSTM cell and update input-cell-hidden states
-            h_t, c_t = self.lstm_cell(cur_input, (h_t, c_t))
-            o_t = self.fc_out(c_t)
-
-            # Save states
-            c_states[:, t, :] = c_t
-            h_states[:, t, :] = h_t
-            outputs[:, t, :] = o_t
-
-            # Update input at time step t+1
-            cur_input = o_t
-
-        # Return cell and hidden states
-        return h_states, c_states, outputs
-
-
-class LSTM_Dec_v2(nn.Module):
-    """
-    Implements LSTM Decoder architecture. A context vector of fixed dimension is given, and used as the sequence of input vectors for multiple time steps for the LSTM.
-    """
-    def __init__(self, 
-        time_steps: int, # Number of observations to generate
-        input_dim: int,  # Dimensionality of input vectors
-        output_dim: int, # Dimensionality of output vector
-        hidden_dim: int, # Dimensionality of hidden state
-        num_layers: int = 1,  # Number of layers (default = 1)
-        dropout: float = 0.0, # Dropout rate (default = 0.0, i.e. no dropout)
-        **kwargs):
-
-        # Call parent class constructor
-        super().__init__()
-
-        # Initialise parameters
-        self.num_steps = time_steps
-        self.i_dim, self.o_dim, self.h_dim = input_dim, output_dim, hidden_dim
-        self.n_layers, self.dropout = num_layers, dropout
-
-        # Define main LSTM layer and output layer
-        self.lstm = LSTMCell(input_size=self.i_dim, hidden_dim=self.h_dim, num_layers=self.n_layers, dropout=self.dropout, **kwargs)
-        self.fc_out = nn.Linear(self.h_dim, self.o_dim)  
-
-    # Forward pass
-    def forward(self, context_vector: torch.Tensor):
-        """
-        Forward pass of v2 LSTM Decoder. Given context vector, use it as input sequence for LSTM.
-        
-        Params:
-            - context_vector: context vector of fixed dimensionality, of shape (N, D), where N is batch size and D is latent dimensionality.
-        """
-        #  Get parameters
-        bs, T = context_vector.shape[0], self.seq_len
-
-        # Define input sequence for LSTM
-        input_seq = context_vector.unsqueeze(1).expand(-1, self.num_steps, -1) # (N, T, D)
-        batch_size = input_seq.shape[0]
-
-        # Pass through LSTM
-        h0 = torch.zeros(bs, T, self.h_dim).to(context_vector.device)
-        c0 = torch.zeros(bs, T, self.h_dim).to(context_vector.device)
-        output, _ = self.lstm(input_seq, (h0, c0)) # (N, T, D)
-
-        return output
-# endregion
 
 
 # region DirVRNN
@@ -299,7 +175,7 @@ class DirVRNN(nn.Module):
 
 
     # Define training process for this class.
-    def forward(self, x, y):
+    def forward(self, x, y) -> Tuple[torch.Tensor, Dict]:
         """
         Model loss computation given batch objects during training. Note that we implement 
         a window size within our model itself. Time alignment is checked through pre-processing.
@@ -445,10 +321,10 @@ class DirVRNN(nn.Module):
             - history: dictionary with training history, including each loss component.
         """
         # Set Weights and Biases Logger
-        run_name = run_config['run_name']
+        run_name, model_name = run_config['run_name'], run_config["model_name"]
         data_name = data_info['data_load_config']['data_name']
         wandb.init(
-                name= "{}-{}".format(run_name, data_name),
+                name= "{}-{}-{}".format(model_name, data_name, run_name),
                 entity="hrna-ox", 
                 dir=f"exps/Dir_VRNN/{data_info['data_load_config']['data_name']}",
                 project="Dir_VRNN", 
@@ -464,7 +340,7 @@ class DirVRNN(nn.Module):
 
         # Prepare data for training
         train_dataset = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, sampler=RandomSampler)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
         # Define optimizer
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
@@ -475,8 +351,10 @@ class DirVRNN(nn.Module):
 
             # Set model to train mode and initialize loss tracker
             self.train()
-            train_loss = 0
-            train_loglik, train_kl, train_out = 0, 0, 0
+            train_loss = torch.Tensor(0, device=self.device)
+            train_loglik = torch.Tensor(0, device=self.device)
+            train_kl = torch.Tensor(0, device=self.device)
+            train_out = torch.Tensor(0, device=self.device)
 
             # Iterate through batches
             for batch_id, (x, y) in enumerate(train_loader):
@@ -525,7 +403,7 @@ class DirVRNN(nn.Module):
         )	
             
             # Check performance on validation set
-            _, _ = self.validate(X_val, y_val, epoch=epoch)
+            self.validate(X_val, y_val, epoch=epoch)
     
     def validate(self, X, y, epoch: int):
         """
@@ -605,33 +483,28 @@ class DirVRNN(nn.Module):
                     step=epoch+1
                 )	        
     
-            return val_loss, history_objects
-        
-    def predict(self, X, y):
-        """Similar to forward, but focus on the computations of the model."""
-        _, history_objects = self.forward(X, y)
+                return val_loss, history_objects
 
-        # Extract objects from history
+    def predict(self, X ,y):
+        # Similar to forward method, but focus on inner computations and tracking objects for the model.
+        _, history_objects = self.forward(X, y)      # Run forward pass
+
+        # Extract computed objects
         est_pis = history_objects["pis"]
         mugs, log_vargs = history_objects["mugs"], history_objects["log_vargs"]
 
-        # Get phenotypes and append
+        # Compute phenotypes
         history_objects["prob_phens"] = model_utils.torch_get_temp_phens(est_pis, y_true=y, mode="prob")
         history_objects["clus_phens"] = model_utils.torch_get_temp_phens(est_pis, y_true=y, mode="one-hot")
 
-        # Sample from the generated mu_g and var_g
+        # Sample to obtain generated samples
         history_objects["x_samples"] = model_utils.gen_diagonal_mvn(mugs, log_vargs)
 
-        # Convert to right format
-        
-
-        # Log to wandb
-        wandb.log({
-            "test/prob_phens": 
-        })
+        # Save output
+        wandb.log({"test/{}".format(key): value for key, value in history_objects.items()}) 
 
         return history_objects
-    
+
     # Useful methods for model
     def x_feat_extr(self, x):
         return self.phi_x_out(self.phi_x(x))

@@ -34,14 +34,14 @@ def main():
     # GPU and model setting
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(run_config["model_config"]["seed"])
-    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.deterministic = True # type: ignore
     print("\n\nRunning training on device: \n", device, "\n\n")
     
     # Load and process data
     data_info = data_loader(**data_config)
 
     # Get model
-    model = DirVRNN(**model_config, device=device).to(device)
+    model = DirVRNN(**model_config, device=device).to(device) # type: ignore
 
     # Train model on data
     print("\n\nTraining model...\n\n")
@@ -60,6 +60,7 @@ def main():
     X_test = torch.Tensor(data_info["X"][-1], device=device)
     y_test = torch.Tensor(data_info["y"][-1], device=device)
 
+    # Run model on test data
     model.eval()
     output_dic = model.predict(X_test, y_test)
 

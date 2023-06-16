@@ -11,7 +11,10 @@ b) Long Short Term Memory (LSTM)
 """
 
 # region 0 - Imports 
+import torch
 import torch.nn as nn
+
+from torch.nn import LSTMCell
 
 #endregion
 
@@ -80,7 +83,7 @@ class MLP(nn.Module):
         _x = x
 
         # Iterate through layers
-        for layer_i in self.nn_layers[:-1]:
+        for layer_i in self.nn_layers[:-1]: # type: ignore
 
             # Apply layer transformation
             inter_x = layer_i(_x)                # Layer defines map
@@ -121,3 +124,127 @@ class MLP(nn.Module):
             return fn_str # Assume it is a torch activation function already
 
 # endregion
+
+
+# region Define LSTM Decoder v1 (use output at time t as input at time t+1)
+class LSTM_Dec_v1(nn.Module):
+    """
+    Implements LSTM Decoder architecture. A context vector of fixed dimension is given as input to the hidden/cell state of the decoder, and the first input is a vector
+    of zeros. At each time-step the output of the LSTM is used as input for the next time-step.
+    """
+    def __init__(self,
+        seq_len: int,     # Number of observations to generate
+        output_dim: int,   # Dimensionality of output vectors
+        hidden_dim: int,  # Dimensionality of hidden state
+        num_layers: int = 1,  # Number of layers (default = 1)
+        dropout: float = 0.0, # Dropout rate (default = 0.0, i.e. no dropout)
+        **kwargs): 
+        """
+        Object initialization given input parameters.
+        """
+
+        # Call parent class constructor
+        super().__init__()
+
+        # Initialise parameters
+        self.seq_len, self.h_dim = seq_len, hidden_dim
+        self.i_dim, self.o_dim = output_dim, output_dim        # The output dim must match the input dim for the next time-step
+        self.n_layers, self.dropout = num_layers, dropout
+
+        # Define main LSTM layer and output layer
+        self.lstm_cell = LSTMCell(input_size=self.i_dim, hidden_size=self.h_dim, bias=True)
+        self.fc_out = nn.Linear(self.h_dim, self.o_dim)
+
+    # Forward pass
+    def forward(self, c_vector: torch.Tensor):
+        """
+        Forward pass of LSTM Decoder. Given a context vector, initialise cell and hidden states of LSTM decoder. Pass zero as first input vector of sequence.
+
+        Params:
+        - c_vector: context vector of fixed dimensionality, of shape (N, D), where N is batch size and D is latent dimensionality.
+        """
+
+
+        #  Get parameters
+        bs, T = c_vector.shape[0], self.seq_len
+
+        # Define trackers for cell and hidden states.
+        c_states = torch.zeros(bs, T, self.h_dim).to(c_vector.device)
+        h_states = torch.zeros(bs, T, self.h_dim).to(c_vector.device)
+        outputs = torch.zeros(bs, T, self.o_dim).to(c_vector.device)
+
+        # Set values at time 0
+        c_states[:, 0, :] = c_vector
+        h_states[:, 0, :] = c_vector
+
+        # Initialise iterates
+        cur_input = torch.zeros(bs, self.i_dim).to(c_vector.device)
+        h_t, c_t = c_vector, c_vector
+        
+        # Apply LSTM Cell to generate sequence
+        for t in range(T):
+
+            # Pass through LSTM cell and update input-cell-hidden states
+            h_t, c_t = self.lstm_cell(cur_input, (h_t, c_t))
+            o_t = self.fc_out(c_t)
+
+            # Save states
+            c_states[:, t, :] = c_t
+            h_states[:, t, :] = h_t
+            outputs[:, t, :] = o_t
+
+            # Update input at time step t+1
+            cur_input = o_t
+
+        # Return cell and hidden states
+        return h_states, c_states, outputs
+
+
+class LSTM_Dec_v2(nn.Module):
+    """
+    Implements LSTM Decoder architecture. A context vector of fixed dimension is given, and used as the sequence of input vectors for multiple time steps for the LSTM.
+    """
+    def __init__(self, 
+        seq_len: int,     # Number of observations to generate
+        input_dim: int,  # Dimensionality of input vectors
+        output_dim: int, # Dimensionality of output vector
+        hidden_dim: int, # Dimensionality of hidden state
+        num_layers: int = 1,  # Number of layers (default = 1)
+        dropout: float = 0.0, # Dropout rate (default = 0.0, i.e. no dropout)
+        **kwargs):
+
+        # Call parent class constructor
+        super().__init__()
+
+        # Initialise parameters
+        self.seq_len = seq_len
+        self.i_dim, self.o_dim, self.h_dim = input_dim, output_dim, hidden_dim
+        self.n_layers, self.dropout = num_layers, dropout
+
+        # Define main LSTM layer and output layer
+        self.lstm = LSTMCell(input_size=self.i_dim, hidden_size=self.h_dim, **kwargs)
+        self.fc_out = nn.Linear(self.h_dim, self.o_dim)  
+
+    # Forward pass
+    def forward(self, context_vector: torch.Tensor):
+        """
+        Forward pass of v2 LSTM Decoder. Given context vector, use it as input sequence for LSTM.
+        
+        Params:
+            - context_vector: context vector of fixed dimensionality, of shape (N, D), where N is batch size and D is latent dimensionality.
+        """
+        #  Get parameters
+        bs, T = context_vector.shape[0], int(self.seq_len)
+
+        # Define input sequence for LSTM
+        input_seq = context_vector.unsqueeze(1).expand(-1, T, -1) # (N, T, D)
+        batch_size = input_seq.shape[0]
+
+        # Pass through LSTM
+        h0 = torch.zeros(bs, T, self.h_dim, device=context_vector.device)
+        c0 = torch.zeros(bs, T, self.h_dim, device=context_vector.device)
+        output, _ = self.lstm(input_seq, (h0, c0)) # (N, T, D)
+
+        return output
+# endregion
+

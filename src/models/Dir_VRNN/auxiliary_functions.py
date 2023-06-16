@@ -181,7 +181,7 @@ def torch_get_temp_phens(pis_assign: torch.Tensor, y_true: torch.Tensor, mode: s
 
     return phens
 
-def torch_clus_means_separability(clus_means: torch.Tensor) -> torch.Tensor():
+def torch_clus_means_separability(clus_means: torch.Tensor) -> torch.Tensor:
     """Compute latent space separability between cluster means.
 
     Args:
@@ -203,7 +203,7 @@ def torch_clus_means_separability(clus_means: torch.Tensor) -> torch.Tensor():
 
     return avg_dist
 
-def torch_clus_mean_2D_tsneproj(clus_means: torch.Tensor, seed: int) -> torch.Tensor():
+def torch_clus_mean_2D_tsneproj(clus_means: torch.Tensor, seed: int) -> torch.Tensor:
     """Get 2D TSNE plot of cluster means.
 
     Args:
@@ -221,7 +221,7 @@ def torch_clus_mean_2D_tsneproj(clus_means: torch.Tensor, seed: int) -> torch.Te
     clus_reps = tsne.fit_transform(clus_means)
 
     # Return figure
-    return clus_reps
+    return torch.Tensor(clus_reps)
 
 
 # endregion
