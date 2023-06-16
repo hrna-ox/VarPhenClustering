@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import wandb
 
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Union
 from torch.utils.data import DataLoader, TensorDataset, RandomSampler
 
 import src.models.losses_and_metrics as LM_utils
@@ -18,6 +18,8 @@ from src.models.deep_learning_base_classes import MLP, LSTM_Dec_v1, LSTM_Dec_v2
 
 import src.models.Dir_VRNN.auxiliary_functions as model_utils
 from src.models.Dir_VRNN.auxiliary_functions import eps
+
+import matplotlib.pyplot as plt
 
 
 # region DirVRNN
@@ -321,7 +323,7 @@ class DirVRNN(nn.Module):
             - history: dictionary with training history, including each loss component.
         """
         # Set Weights and Biases Logger
-        run_name, model_name = run_config['run_name'], run_config["model_name"]
+        run_name, model_name = run_config['run_name'], run_config["model_config"]["model_name"]
         data_name = data_info['data_load_config']['data_name']
         wandb.init(
                 name= "{}-{}-{}".format(model_name, data_name, run_name),
@@ -351,10 +353,10 @@ class DirVRNN(nn.Module):
 
             # Set model to train mode and initialize loss tracker
             self.train()
-            train_loss = torch.Tensor(0, device=self.device)
-            train_loglik = torch.Tensor(0, device=self.device)
-            train_kl = torch.Tensor(0, device=self.device)
-            train_out = torch.Tensor(0, device=self.device)
+            train_loss = 0
+            train_loglik = 0
+            train_kl = 0
+            train_out = 0
 
             # Iterate through batches
             for batch_id, (x, y) in enumerate(train_loader):
@@ -382,9 +384,9 @@ class DirVRNN(nn.Module):
                     end="\r")
                 
             # Print message at the end of epoch
-            epoch_loglik = torch.sum(train_loglik)
-            epoch_kl = torch.sum(train_kl)
-            epoch_out = torch.mean(train_out)
+            epoch_loglik = torch.sum(train_loglik) # type: ignore
+            epoch_kl = torch.sum(train_kl) # type: ignore
+            epoch_out = torch.mean(train_out) # type: ignore
 
             print("Train epoch {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
                 epoch, 100, 
@@ -485,7 +487,7 @@ class DirVRNN(nn.Module):
     
                 return val_loss, history_objects
 
-    def predict(self, X ,y):
+    def predict(self, X ,y, run_config: Union[Dict, None] = None):
         # Similar to forward method, but focus on inner computations and tracking objects for the model.
         _, history_objects = self.forward(X, y)      # Run forward pass
 
@@ -493,15 +495,47 @@ class DirVRNN(nn.Module):
         est_pis = history_objects["pis"]
         mugs, log_vargs = history_objects["mugs"], history_objects["log_vargs"]
 
-        # Compute phenotypes
-        history_objects["prob_phens"] = model_utils.torch_get_temp_phens(est_pis, y_true=y, mode="prob")
-        history_objects["clus_phens"] = model_utils.torch_get_temp_phens(est_pis, y_true=y, mode="one-hot")
-
-        # Sample to obtain generated samples
-        history_objects["x_samples"] = model_utils.gen_diagonal_mvn(mugs, log_vargs)
-
         # Save output
         wandb.log({"test/{}".format(key): value for key, value in history_objects.items()}) 
+
+        # Compute phenotypes
+        prob_phens = model_utils.torch_get_temp_phens(est_pis, y_true=y, mode="prob")
+        clus_phens = model_utils.torch_get_temp_phens(est_pis, y_true=y, mode="one-hot")
+        history_objects["prob_phens"], history_objects["clus_phens"] = prob_phens, clus_phens
+
+        # Save Phenotypes
+        for clus_id in range(self.K):
+            wandb.log({
+                "test/{}-phens-prob".format(clus_id): prob_phens[clus_id, :, :],
+                "test/{}-phens-onehot".format(clus_id): clus_phens[clus_id, :, :],
+            })
+
+
+        # Sample to obtain generated samples
+        gen_samples = model_utils.gen_diagonal_mvn(mugs, log_vargs)
+        history_objects["x_samples"] = gen_samples
+
+        # Sample 10 random patients and plot to Wandb
+        random_pats_10 = torch.randint(low=0, high=X.shape[0], size=(10,))
+
+        for _pat_id in random_pats_10:
+
+            # Select true data and generated data
+            _x_pat = X[_pat_id, :, :]
+            _x_gen = gen_samples[_pat_id, :, :]
+
+            # Plot to Wandb
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(_x_pat.detach().numpy(), label="True")
+            ax.plot(_x_gen.detach().numpy(), label="Generated")
+            wandb.log({
+                "test/{}-pat".format(_pat_id): wandb.Image(fig)
+            })
+
+        # Append Test data
+        history_objects["X_test"] = X
+        history_objects["y_test"] = y
+        history_objects["run_config"] = run_config
 
         return history_objects
 

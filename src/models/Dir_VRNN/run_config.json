@@ -1,5 +1,5 @@
 {
-   "run_name": "test-4",
+   "run_name": "test-5",
    "data_config": {
       "data_name": "MIMIC",
       "target_window": 48,
@@ -22,7 +22,7 @@
    },
    "training_config": {
       "lr": 0.001,
-      "num_epochs": 1000,
+      "num_epochs": 3,
       "batch_size": 256
    }
 }

@@ -28,5 +28,6 @@
         "relu",
         "resprate",
         "VRNN"
-    ]
+    ],
+    "python.analysis.typeCheckingMode": "basic"
 }

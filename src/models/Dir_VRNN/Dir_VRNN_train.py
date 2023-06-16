@@ -7,6 +7,7 @@ File to train Dirichlet-VRNN Model.
 
 # region =============== IMPORT LIBRARIES ===============s
 import json
+import os
 
 import torch
 import wandb
@@ -49,8 +50,12 @@ def main():
     model.fit(data_info=data_info, train_info=training_config, run_config=run_config)
 
     # Save Model 
-    torch.save(model.state_dict(), "DirVRNN.h5")
-    wandb.save("model.h5")
+    save_fd = "exps/Dir_VRNN/{}/{}".format(data_config["data_name"], run_config["run_name"])
+    if not os.path.exists(save_fd):
+        os.makedirs(save_fd)
+        
+    torch.save(model.state_dict(), save_fd + "/model.h5")
+    # wandb.save(save_fd + "/model.h5")
 
 
     # Run on Test data
@@ -62,10 +67,11 @@ def main():
 
     # Run model on test data
     model.eval()
-    output_dic = model.predict(X_test, y_test)
+    output_dic = model.predict(X_test, y_test, run_config=run_config)
 
-    # Finish recording session
+    # Finish recording session and save outputs
     wandb.finish()
+    torch.save(output_dic, save_fd + "/output_dic.h5")
 
 # endregion
 

@@ -113,7 +113,7 @@ def torch_phens_from_prob(pis_assign: torch.Tensor, y_true: torch.Tensor):
     )
 
     # Normalize phenotypes per cluster
-    phens = unnorm_phens / torch.sum(unnorm_phens, dim=1, keepdim=True)
+    phens = unnorm_phens / (torch.sum(unnorm_phens, dim=1, keepdim=True) + eps)
 
     return phens
 
@@ -134,7 +134,7 @@ def torch_phens_from_clus(pis_assign: torch.Tensor, y_true: torch.Tensor):
     K = pis_assign.size(1)
 
     # Assign patients to most likely cluster and convert to one-hot encoded vector.
-    clus_assign = one_hot(torch.argmax(pis_assign, dim=1), num_classes=K).float()  # (N, K) of indicator vectors
+    clus_assign = one_hot(torch.argmax(pis_assign, dim=-1), num_classes=K).float()  # (N, K) of indicator vectors
 
     # Apply previous function to estimate phenotypes
     phens = torch_phens_from_prob(clus_assign, y_true)
