@@ -17,6 +17,7 @@ This files processes MIMIC-IV-ED outcome data for each admission. The following 
 """
 
 # Import Libraries
+from typing import Union
 import src.data_processing.MIMIC.test_functions as tests
 import datetime as dt
 import json
@@ -114,7 +115,7 @@ def get_first_ward_time(df):
     return earliest_ward_time
 
 
-def compute_outcomes_from_events(df: pd.DataFrame, time_window: pd.Timedelta):
+def compute_outcomes_from_events(df: pd.DataFrame, time_window: pd.Timedelta) -> Union[pd.DataFrame, pd.Series]:
     """
     Given a dataframe with time information for each event, and the time window from outtime, compute the relevant
     outcome.
@@ -266,7 +267,6 @@ def main():
         d) ED intime is prior to ED register intime.
         e) Discharge from hospital is after next transfer outtime (or is missing), allowing for some delay (6 hours).
     """
-
     admissions_S2 = (
         admissions_S1
         # admissions to hospital after ED admissions
@@ -277,7 +277,7 @@ def main():
         .query("outtime <= edouttime")
         # transfer intime before ed registration time
         .query("intime <= edregtime")
-        .query("outtime_next - dischtime <= @pd.Timedelta('6h') | outtime_next.isna()")
+        # .query("outtime_next <= (dischtime + @pd.Timedelta('6h')) | outtime_next.isna()")
         # discharge time not earlier than outtime_next (added -6 hours due to some potential delays)
     )
 
@@ -352,7 +352,7 @@ def main():
 
 
     # Convert to one hot encoding
-    oh_outcomes = pd.get_dummies(cat_outcomes.squeeze()).sort_index().reset_index(drop=False)
+    oh_outcomes = pd.get_dummies(cat_outcomes).sort_index().reset_index(drop=False)
 
     # Subset admissions and vitals
     admissions_final = adm_proc.query("stay_id.isin(@oh_outcomes.stay_id)").sort_values("stay_id")
