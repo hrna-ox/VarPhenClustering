@@ -2,9 +2,14 @@
 """
 Utility Functions for Loading Data and Saving/Evaluating Results.
 """
+
+# Import Functions
 import os
+from typing import Union, List, Tuple
+
 import numpy as np
 import pandas as pd
+
 from tqdm import tqdm
 
 from src.data_processing.MIMIC.data_utils import convert_to_timedelta
@@ -185,43 +190,6 @@ def _median_fill(array):
     return array_out
 
 
-def _load(data_name, window=4):
-    """Load Trajectory, Target data jointly given data folder."""
-
-    # Make data folder
-    data_fd = f"data/{data_name}/processed/"
-    try:
-        os.path.exists(data_fd)
-    except AssertionError:
-        print(data_fd)
-
-    if "HAVEN" in data_name:
-
-        # Load Data
-        X = pd.read_csv(data_fd + "COPD_VLS_process.csv", parse_dates=HAVEN_PARSE_TIME_VARS, header=0)
-        y = pd.read_csv(data_fd + "copd_outcomes.csv", index_col=0)
-
-    elif "MIMIC" in data_name:
-
-        # Load Data
-        X = pd.read_csv(data_fd + "vitals_process.csv", parse_dates=MIMIC_PARSE_TIME_VARS, header=0, index_col=0)
-        y = pd.read_csv(data_fd + f"outcomes_{window}_process.csv", index_col=0)
-
-        # Convert columns to timedelta
-        X = convert_to_timedelta(X, *MIMIC_PARSE_TD_VARS)
-
-    elif "SAMPLE" in data_name:
-
-        # Load data
-        X = None
-        y = None
-
-    else:
-        raise ValueError(f"Data Name does not match available datasets. Input Folder provided {data_fd}")
-
-    return X, y
-
-
 def impute(X):
     """
     Imputation of 3D array accordingly with time as dimension 1:
@@ -287,12 +255,16 @@ def _check_input_format(X, y):
         cond1 = X.shape[0] == y.shape[0]
         cond2 = len(X.shape) == 3
         cond3 = len(y.shape) == 2
+    def load(self):
+        """Load Dataset according to given parameters."""
 
-        # Check non-missing values
-        cond4 = np.sum(np.isnan(X)) + np.sum(np.isnan(y)) == 0
+        # Load data
+        data = _load(self.dataset_name, window=self.target_window)
 
-        # Check y output is one hot encoded
-        cond5 = np.all(np.sum(y, axis=1) == 1)
+        # Get data info
+        self.id_col, self.time_col, self.needs_time_to_end_computation = get_ids(self.dataset_name)
+
+        return data
 
         # assert cond1
         # assert cond2
@@ -330,39 +302,85 @@ def _subset_to_balanced(X, y, mask, ids):
     return X_out, y_out, mask_out, ids_out
 
 
-class DataProcessor:
+class CSVLoader:
     """
-    Data Processor Class for Data Loading and conversion to input. By default, time columns should be in dt.datetime
-    format and are converted to hours.
+    Loader Class for loading data from CSV files. 
 
-    Params:
-        - data_name: str, which dataset to load
-        - outcome_window: str, how many hours to outcome from outtime admission.
-        - feat_set: str or list. If list, list of features to consider for input. If str, convert to list according
-        to corresponding name.
-        - time_range: tuple of floats, for each admission, consider only admissions between these endpoints.
-        - include_time: bool, indicates whether to add time difference between consecutive observations as a variable.
+    Mainly loads and preprocesses data according to configuration file.
     """
 
-    def __init__(self, data_name="HAVEN", target_window=4, feat_set='vitals',
-                 time_range=(24, 72)):
+    def __init__(self, data_name: str, feat_set: Union[str, List], time_range: Tuple[float, float] = (0, 10000)):
+        """
+        Class Object Initializer.
+        
+        Params:
+            - data_name: ('HAVEN', 'MIMIC', ...)
+            - feat_set: str or List. Set of features to consider for input data.
+            - time_range: tuple of floats, for each admission, subset observations within the two endpoints indicated in time_range.
+            # - outcome_window: str, how many hours to outcome from outtime admission.
+            
+        """
 
-        # Dataset selection and feature subset
-        self.dataset_name = data_name
-        self.target_window = target_window
-        self.feat_set = feat_set
+        # Save parameters
+        self.data_name, self.features, self.time_range = data_name.upper(), feat_set, time_range
 
-        # Subset observations between time range
-        self.time_range = time_range
+        # Initialise other artifacts relevant to data processing
 
-        # Ids depending on data
-        self.id_col = None
-        self.time_col = None
-        self.needs_time_to_end_computation = False
+        # # Ids depending on data
+        # self.id_col = None
+        # self.time_col = None
+        # self.needs_time_to_end_computation = False
 
-        # Mean, Divisor for normalisation. Initialise to None.
-        self.min = None
-        self.max = None
+        # # Mean, Divisor for normalization. Initialise to None.
+        # self.min = None
+        # self.max = None
+
+    def _load(self):
+        """
+        Load data from CSV and get info related to specific data loaded.
+        """
+
+        # Make data folder and check existence
+        data_fd = f"data/{self.data_name}/processed/"
+
+        try:
+            os.path.exists(data_fd)
+        except AssertionError as e:
+            raise AssertionError("Data folder does not exist. Please check data folder name. {} was provided.".format(data_fd))
+
+        # Load data
+        if self.data_name == "HAVEN":
+
+            # Load Data
+            X = pd.read_csv(data_fd + "X_process.csv", infer_datetime_format=True, header=0)
+            X = pd.read_csv(data_fd + "COPD_VLS_process.csv", parse_dates=HAVEN_PARSE_TIME_VARS, header=0)
+            y = pd.read_csv(data_fd + "copd_outcomes.csv", index_col=0)
+
+        elif "MIMIC" in data_name:
+
+            # Load Data
+            X = pd.read_csv(data_fd + "vitals_process.csv", parse_dates=MIMIC_PARSE_TIME_VARS, header=0, index_col=0)
+            y = pd.read_csv(data_fd + f"outcomes_{window}_process.csv", index_col=0)
+
+            # Convert columns to timedelta
+            X = convert_to_timedelta(X, *MIMIC_PARSE_TD_VARS)
+
+        elif "SAMPLE" in data_name:
+
+            # Load data
+            X = None
+            y = None
+
+        else:
+            raise ValueError(f"Data Name does not match available datasets. Input Folder provided {data_fd}")
+
+        return X, y
+    
+
+        # Get data info
+        self.id_col, self.time_col, self.needs_time_to_end_computation = get_ids(self.data_name)
+
+        return data
 
     def load_transform(self):
         """Load Dataset and Transform to input format."""
@@ -399,8 +417,8 @@ class DataProcessor:
         # Convert to 3D array
         x_inter, pat_time_ids = self.convert_to_3darray(x_subset)
 
-        # Normalise array
-        x_inter = self.normalise(x_inter)
+        # Normalize array
+        x_inter = self.normalize(x_inter)
 
         # Impute missing values
         x_out, mask = impute(x_inter)
@@ -503,17 +521,17 @@ class DataProcessor:
 
         return out_array.astype("float32"), id_times_array.astype("float32")
 
-    def normalise(self, X):
-        """Given 3D array, normalise according to min-max method."""
+    def normalize(self, X):
+        """Given 3D array, normalize according to min-max method."""
         self.min = np.nanmin(X, axis=0, keepdims=True)
         self.max = np.nanmax(X, axis=0, keepdims=True)
 
         return np.divide(X - self.min, self.max - self.min)
 
-    def apply_normalisation(self, X):
-        """Apply normalisation with current parameters to another dataset."""
+    def apply_normalization(self, X):
+        """Apply normalization with current parameters to another dataset."""
         if self.min is None or self.max is None:
-            raise ValueError(f"Attributes min and/or max are not yet computed. Run 'normalise' method instead.")
+            raise ValueError(f"Attributes min and/or max are not yet computed. Run 'normalize' method instead.")
 
         else:
             return np.divide(X - self.min, self.max - self.min)
