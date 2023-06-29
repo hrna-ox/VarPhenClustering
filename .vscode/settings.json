@@ -1,33 +1,34 @@
 {
     "cSpell.words": [
         "admittime",
-        "careunit",
-        "charttime",
-        "deathtime",
-        "dischtime",
-        "edouttime",
-        "edregtime",
-        "hadm",
-        "icus",
-        "intime",
-        "OBSERVS",
-        "obvs",
-        "outtime",
+        "AVPU",
         "careunit",
         "charttime",
         "clus",
         "deathtime",
         "dischtime",
+        "edouttime",
+        "edregtime",
+        "elec",
         "extr",
+        "hadm",
         "heartrate",
+        "icus",
         "intime",
         "logvar",
         "nvarg",
+        "OBSERVS",
+        "obvs",
+        "outc",
         "outtime",
         "outtimes",
         "relu",
         "resprate",
         "VRNN"
     ],
-    "python.analysis.typeCheckingMode": "basic"
+    "python.analysis.typeCheckingMode": "basic",
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter"
+    },
+    "python.formatting.provider": "none"
 }

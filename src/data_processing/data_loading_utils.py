@@ -17,148 +17,101 @@ from src.data_processing.MIMIC.data_utils import convert_to_timedelta
 # ---------------------------------------------------------------------------------------
 "Global variables for specific dataset information loading."
 
-HAVEN_PARSE_TIME_VARS = ['charttime', 'hadm_end_time', 'hadm_start_time', 'event_time']
-HAVEN_VITALS = ['HR', 'RR', 'SBP', 'DBP', 'SPO2', 'FIO2', 'TEMP', 'AVPU']
-HAVEN_SERUM = ['HGB', 'WBC', 'EOS', 'BAS', 'NEU', 'LYM']
-HAVEN_BIOCHEM = ['ALB', 'CR', 'CRP', 'POT', 'SOD', 'UR']
-HAVEN_STATIC = ['age', 'gender', 'is_elec', 'is_surg']
-HAVEN_OUTCOME_NAMES = ['Healthy', 'Death', 'ICU', 'Card']
+# HAVEN Data
+HAVEN_FEATURES = {
+    "VITALS": ["HR", "RR", "SBP", "DBP", "SPO2", "FIO2", "TEMP", "AVPU"],
+    "STATIC": ["age", "gender", "is_elec", "is_surg"],
+    "SERUM": ["HGB", "WBC", "EOS", "BAS", "NEU", "LYM"],
+    "BIOCHEM": ["ALB", "CR", "CRP", "POT", "SOD", "UR"],
+    "OUTCOMES": ["Healthy", "Death", "ICU", "Card"],
+}
 
-MIMIC_PARSE_TIME_VARS = ["intime", "outtime"]
-MIMIC_PARSE_TD_VARS = ["sampled_time_to_end"]
-MIMIC_VITALS = ["TEMP", "HR", "RR", "SPO2", "SBP", "DBP"]
-MIMIC_STATIC = ["age", "gender", "ESI"]
-MIMIC_OUTCOME_NAMES = ["Death", "ICU", "Ward", "Discharge"]
-
-MAIN_ID_LIST = ["subject_id", "hadm_id", "stay_id", "patient_id", "pat_id"]  # Identifiers for main ids.
+# MIMIC Data
+MIMIC_FEATURES = {
+    "VITALS": ["TEMP", "HR", "RR", "SPO2", "SBP", "DBP"],
+    "STATIC": ["age", "gender", "ESI"],
+    "OUTCOMES": ["Death", "ICU", "Ward", "Discharge"],
+}
 
 # ----------------------------------------------------------------------------------------
 "Useful functions to define"
 
 
-def _is_id_feat(feat):
+def _get_features(feat_set, data_name: str):
     """
-    Boolean indicator to identify if feature is a key identifier in data or not.
+    Obtain the list of features to subset.
 
     Params:
-    - feat: str, name of feature.
-
-    Returns:
-        - bool, indicates if feature is used as identifier in processing.
+    - feat_set: str, set of features to subset or list (the latter is returned as is)
+    - data_name: str, name of the dataset to subset features from
     """
-    is_id_1 = feat in HAVEN_PARSE_TIME_VARS + MIMIC_PARSE_TIME_VARS + MIMIC_PARSE_TD_VARS + MAIN_ID_LIST
-    is_id_2 = "time_to_end" in feat
 
-    return is_id_1 or is_id_2
+    # If feat_set is list then return as is
+    if isinstance(feat_set, list):
+        return feat_set
 
+    if data_name == "HAVEN":
+        features = HAVEN_FEATURES
 
-def _is_static_feat(feat):
-    """
-    Boolean indicator to identify if feature is a static variable in data or not.
-
-    Params:
-    - feat: str, name of feature.
-
-    Returns:
-        - bool, indicates if feature is a static biomedical variable.
-    """
-    is_static = feat in HAVEN_STATIC + MIMIC_STATIC
-
-    return is_static
-
-
-def _is_temporal_feat(feat):
-    """
-    Boolean indicator to identify if feature is temporal or not.
-
-    Params:
-    - feat: str, name of feature.
-
-    Returns:
-        - bool, indicates if feat is a biomedical variable which varies over time.
-    """
-    is_time_feat = feat in HAVEN_VITALS + HAVEN_SERUM + HAVEN_BIOCHEM + MIMIC_VITALS
-
-    return is_time_feat
-
-
-def convert_datetime_to_hour(series):
-    """Convert pandas Series of datetime values to float Series with corresponding hour values"""
-    seconds_per_hour = 3600
-
-    return series.dt.total_seconds() / seconds_per_hour
-
-
-def _get_features(key, data_name="HAVEN"):
-    """
-    Compute list of features to keep given key. Key can be one of:
-    - str, where the corresponding features are selected according to the fn below.
-    - list, where the corresponding features are the original list.
-    """
-    if isinstance(key, list):
-        return key
-
-    elif isinstance(key, str):
-        if data_name == "HAVEN":
-            vitals = HAVEN_VITALS
-            vars1, vars2 = HAVEN_SERUM, HAVEN_BIOCHEM
-            static = HAVEN_STATIC
-
-        elif data_name == "MIMIC":
-            vitals = MIMIC_VITALS
-            static = MIMIC_STATIC
-            vars1, vars2 = None, None
-
-        elif data_name == "SAMPLE":
-            vitals, vars1, vars2, static = None, None, None, None
-
-        else:
-            raise ValueError(f"Data Name does not match available datasets. Input provided {data_name}")
-
-        # Add features given substrings of key. We initialise set in case of repetition (e.g. 'vars1-lab')
-        features = set([])
-        if "vit" in key.lower():
-            features.update(vitals)
-
-        if "vars1" in key.lower():
-            features.update(vars1)
-
-        if "vars2" in key.lower():
-            features.update(vars2)
-
-        if "lab" in key.lower():
-            features.update(vars1)
-            features.update(vars2)
-
-        if "sta" in key.lower():
-            features.update(static)
-
-        if "all" in key.lower():
-            features = _get_features("vit-lab-sta", data_name)
-
-        sorted_features = sorted(features)  # sorted returns a list of features.
-        print(f"\n{data_name} data has been subsettted to the following features: \n {sorted_features}.")
-
-        return sorted_features
+    elif data_name == "MIMIC":
+        features = MIMIC_FEATURES
 
     else:
-        raise TypeError(f"Argument key must be one of type str or list, type {type(key)} was given.")
+        raise ValueError(
+            f"Data Name does not match available datasets. Input provided {data_name}"
+        )
+
+    # Add a short-cut in case feat_set is all
+    if feat_set == "all":
+        feat_set = "vit-sta-ser-bio"
+
+    # Add features based on substrings of feat_set
+    feat_subset = []
+    if "vit" in feat_set.lower():
+        feat_subset.extend(features["VITALS"])
+
+    if "sta" in feat_set.lower():
+        feat_subset.extend(features["STATIC"])
+
+    if "ser" in feat_set.lower():
+        feat_subset.extend(features["SERUM"])
+
+    if "bio" in feat_set.lower():
+        feat_subset.extend(features["BIOCHEM"])
+
+    if "outc" in feat_set.lower():
+        feat_subset.extend(features["OUTCOMES"])
+
+    # Ensure uniqueness
+    feat_subset = list(set(feat_subset))
+    print(
+        f"\n{data_name} data has been sub-setted to the following features: \n {feat_subset}."
+    )
+
+    return feat_subset
 
 
 def _numpy_forward_fill(array):
-    """Forward Fill a numpy array. Time index is axis = 1."""
+    """
+    Forward Fill a numpy array. Time index is axis = 1.
+    """
     array_mask = np.isnan(array)
     array_out = np.copy(array)
 
     # Add time indices where not masked, and propagate forward
-    inter_array = np.where(~ array_mask, np.arange(array_mask.shape[1]).reshape(1, -1, 1), 0)
-    np.maximum.accumulate(inter_array, axis=1,
-                          out=inter_array)  # For each (n, t, d) missing value, get the previously accessible mask value
+    inter_array = np.where(
+        ~array_mask, np.arange(array_mask.shape[1]).reshape(1, -1, 1), 0
+    )
+    np.maximum.accumulate(
+        inter_array, axis=1, out=inter_array
+    )  # For each (n, t, d) missing value, get the previously accessible mask value
 
     # Index matching for output. For n, d sample as previously, use inter_array for previous time id
-    array_out = array_out[np.arange(array_out.shape[0])[:, None, None],
-                          inter_array,
-                          np.arange(array_out.shape[-1])[None, None, :]]
+    array_out = array_out[
+        np.arange(array_out.shape[0])[:, None, None],
+        inter_array,
+        np.arange(array_out.shape[-1])[None, None, :],
+    ]
 
     return array_out
 
@@ -169,11 +122,17 @@ def _numpy_backward_fill(array):
     array_out = np.copy(array)
 
     # Add time indices where not masked, and propagate backward
-    inter_array = np.where(~ array_mask, np.arange(array_mask.shape[1]).reshape(1, -1, 1), array_mask.shape[1] - 1)
+    inter_array = np.where(
+        ~array_mask,
+        np.arange(array_mask.shape[1]).reshape(1, -1, 1),
+        array_mask.shape[1] - 1,
+    )
     inter_array = np.minimum.accumulate(inter_array[:, ::-1], axis=1)[:, ::-1]
-    array_out = array_out[np.arange(array_out.shape[0])[:, None, None],
-                          inter_array,
-                          np.arange(array_out.shape[-1])[None, None, :]]
+    array_out = array_out[
+        np.arange(array_out.shape[0])[:, None, None],
+        inter_array,
+        np.arange(array_out.shape[-1])[None, None, :],
+    ]
 
     return array_out
 
@@ -184,7 +143,9 @@ def _median_fill(array):
     array_out = np.copy(array)
 
     # Compute median and impute
-    array_med = np.nanmedian(np.nanmedian(array, axis=0, keepdims=True), axis=1, keepdims=True)
+    array_med = np.nanmedian(
+        np.nanmedian(array, axis=0, keepdims=True), axis=1, keepdims=True
+    )
     array_out = np.where(array_mask, array_med, array_out)
 
     return array_out
@@ -193,9 +154,9 @@ def _median_fill(array):
 def impute(X):
     """
     Imputation of 3D array accordingly with time as dimension 1:
-     1st - forward value propagation,
-     2nd - backwards value propagation,
-     3rd - median value imputation.
+    1st - forward value propagation,
+    2nd - backwards value propagation,
+    3rd - median value imputation.
 
     Mask returned at the end, corresponding to original missing values.
     """
@@ -209,44 +170,6 @@ def impute(X):
     return impute_step3, mask
 
 
-def get_ids(data_name):
-    """
-    Get input id information.
-
-    Params:
-    - data_folder: str, folder of dataset, or name of dataset.
-
-    Returns:
-        - Tuple of id col, time col and whether time to end needs computation.
-    """
-
-    if "HAVEN" in data_name:
-        id_col, time_col, needs_time_to_end = "subject_id", "charttime", True
-
-    elif "MIMIC" in data_name:
-        id_col, time_col, needs_time_to_end = "stay_id", "sampled_time_to_end", False
-
-    elif "SAMPLE" in data_name:
-        id_col, time_col, needs_time_to_end = None, None, None
-
-    else:
-        raise ValueError(f"Data Name does not match available datasets. Input Folder provided {data_name}")
-
-    return id_col, time_col, needs_time_to_end
-
-
-def _get_outcome_names(data_name):
-    """Return the corresponding outcome columns given dataset name."""
-    if data_name == "HAVEN":
-        return HAVEN_OUTCOME_NAMES
-
-    elif data_name == "MIMIC":
-        return MIMIC_OUTCOME_NAMES
-
-    elif data_name == "SAMPLE":
-        return None
-
-
 def _check_input_format(X, y):
     """Check conditions to confirm model input."""
 
@@ -255,22 +178,6 @@ def _check_input_format(X, y):
         cond1 = X.shape[0] == y.shape[0]
         cond2 = len(X.shape) == 3
         cond3 = len(y.shape) == 2
-    def load(self):
-        """Load Dataset according to given parameters."""
-
-        # Load data
-        data = _load(self.dataset_name, window=self.target_window)
-
-        # Get data info
-        self.id_col, self.time_col, self.needs_time_to_end_computation = get_ids(self.dataset_name)
-
-        return data
-
-        # assert cond1
-        # assert cond2
-        # assert cond3
-        # assert cond4
-        # assert cond5
 
     except Exception as e:
         print(e)
@@ -284,13 +191,21 @@ def _check_input_format(X, y):
 def _subset_to_balanced(X, y, mask, ids):
     """Subset samples so dataset is more well sampled."""
     class_numbers = np.sum(y, axis=0)
-    largest_class, target_num_samples = np.argmax(class_numbers), np.sort(class_numbers)[-2]
-    print("\nSubsetting class {} from {} to {} samples.".format(largest_class, class_numbers[largest_class],
-                                                              target_num_samples))
+    largest_class, target_num_samples = (
+        np.argmax(class_numbers),
+        np.sort(class_numbers)[-2],
+    )
+    print(
+        "\nSub-setting class {} from {} to {} samples.".format(
+            largest_class, class_numbers[largest_class], target_num_samples
+        )
+    )
 
     # Select random
     largest_class_ids = np.arange(y.shape[0])[y[:, largest_class] == 1]
-    class_ids_samples = np.random.choice(largest_class_ids, size=target_num_samples, replace=False)
+    class_ids_samples = np.random.choice(
+        largest_class_ids, size=target_num_samples, replace=False
+    )
     ids_to_remove_ = np.setdiff1d(largest_class_ids, class_ids_samples)
 
     # Remove relevant ids
@@ -304,38 +219,34 @@ def _subset_to_balanced(X, y, mask, ids):
 
 class CSVLoader:
     """
-    Loader Class for loading data from CSV files. 
+    Loader Class for loading data from CSV files.
 
-    Mainly loads and preprocesses data according to configuration file.
+    Loads the data from csv file, including correct column parsing and formatting.
     """
 
-    def __init__(self, data_name: str, feat_set: Union[str, List], time_range: Tuple[float, float] = (0, 10000)):
+    def __init__(
+        self,
+        data_name: str,
+        feat_set: Union[str, List],
+        time_range: Tuple[float, float] = (0, 10000),
+    ):
         """
         Class Object Initializer.
-        
+
         Params:
             - data_name: ('HAVEN', 'MIMIC', ...)
             - feat_set: str or List. Set of features to consider for input data.
             - time_range: tuple of floats, for each admission, subset observations within the two endpoints indicated in time_range.
-            # - outcome_window: str, how many hours to outcome from outtime admission.
-            
         """
 
         # Save parameters
-        self.data_name, self.features, self.time_range = data_name.upper(), feat_set, time_range
+        self.data_name = data_name.upper()
+        self.features = feat_set
+        self.time_range = time_range
+        self.id_col = "stay_id"
+        self.time_col = "sampled_time_to_end"
 
-        # Initialise other artifacts relevant to data processing
-
-        # # Ids depending on data
-        # self.id_col = None
-        # self.time_col = None
-        # self.needs_time_to_end_computation = False
-
-        # # Mean, Divisor for normalization. Initialise to None.
-        # self.min = None
-        # self.max = None
-
-    def _load(self):
+    def load_from_csv(self):
         """
         Load data from CSV and get info related to specific data loaded.
         """
@@ -343,195 +254,208 @@ class CSVLoader:
         # Make data folder and check existence
         data_fd = f"data/{self.data_name}/processed/"
 
+        # Check correct data loading
         try:
             os.path.exists(data_fd)
+
         except AssertionError as e:
-            raise AssertionError("Data folder does not exist. Please check data folder name. {} was provided.".format(data_fd))
+            print(e)
+            raise AssertionError(
+                f"Data folder does not exist. Please check data folder name. {data_fd} was provided."
+            )
+            
 
         # Load data
         if self.data_name == "HAVEN":
-
-            # Load Data
-            X = pd.read_csv(data_fd + "X_process.csv", infer_datetime_format=True, header=0)
-            X = pd.read_csv(data_fd + "COPD_VLS_process.csv", parse_dates=HAVEN_PARSE_TIME_VARS, header=0)
+            # Get the right data
+            X = pd.read_csv(
+                data_fd + "X_process.csv", infer_datetime_format=True, header=0
+            )
             y = pd.read_csv(data_fd + "copd_outcomes.csv", index_col=0)
 
-        elif "MIMIC" in data_name:
-
+        elif self.data_name == "MIMIC":
             # Load Data
-            X = pd.read_csv(data_fd + "vitals_process.csv", parse_dates=MIMIC_PARSE_TIME_VARS, header=0, index_col=0)
-            y = pd.read_csv(data_fd + f"outcomes_{window}_process.csv", index_col=0)
-
-            # Convert columns to timedelta
-            X = convert_to_timedelta(X, *MIMIC_PARSE_TD_VARS)
-
-        elif "SAMPLE" in data_name:
-
-            # Load data
-            X = None
-            y = None
+            X = pd.read_csv(
+                data_fd + "vitals_process.csv", infer_datetime_format=True, header=0
+            )
+            y = pd.read_csv(data_fd + f"outcomes_process.csv")
 
         else:
-            raise ValueError(f"Data Name does not match available datasets. Input Folder provided {data_fd}")
+            raise ValueError(
+                f"Data Name does not match available datasets. Input Folder provided {data_fd}"
+            )
+
+        # Convert target column to TimeDelta
+        X["sampled_time_to_end"] = pd.to_timedelta(X.loc[:, "sampled_time_to_end"])
+
+        # Convert to hours
+        X["hours_to_end"] = X["sampled_time_to_end"].dt.total_seconds() / 3600
+        self.time_col = "hours_to_end"
 
         return X, y
-    
 
-        # Get data info
-        self.id_col, self.time_col, self.needs_time_to_end_computation = get_ids(self.data_name)
 
-        return data
+def DataTransformer(CSVLoader):
+    """
+    Transformer Class for transforming data loaded from CSV.
+    """
 
-    def load_transform(self):
-        """Load Dataset and Transform to input format."""
-        data = self.load()
-        output = self.transform(data)
+    def __init__(
+        self, 
+        ts_endpoints: Tuple[float, float], 
+        feat_set: Union[str, List], 
+        *args, **kwargs
+    ):
+        """
+        Initialise object parameters and attributes.
 
-        return output
+        Params:
+            - ts_endpoints: Tuple of floats, indicating the endpoints of the time series to consider.
+            - feat_set: str or list, the set of features to consider.
+            - *args, **kwargs: Additional arguments to pass to parent class.
+        """
+        self.ts_min, self.ts_max = ts_endpoints
+        self.features = _get_features(feat_set, self.data_name)
 
-    def load(self):
-        """Load Dataset according to given parameters."""
+        # Other parameters to keep track during transformation
+        self.nan_min, self.nan_max = 0, 0
 
-        # Load data
-        data = _load(self.dataset_name, window=self.target_window)
+        # Call parent class
+        super(CSVLoader, self).__init__(*args, **kwargs)
 
-        # Get data info
-        self.id_col, self.time_col, self.needs_time_to_end_computation = get_ids(self.dataset_name)
+    def transform(self, data: Tuple[pd.DataFrame, pd.DataFrame]):
+        """
+        Transform data according to standard procedure:
+            - Truncate time points within allowed window,
+            - subset to relevant features.
+            - Conversion to 3D array.
+            - Normalization.
+            - Imputation.
+        Params:
+            data (Tuple[DF_LIKE, DF_LIKE]): Tuple (X, y) of DF-like data for input variables (X), and outcome variables (y).
 
-        return data
-
-    def transform(self, data):
-        """Transform data according to instance attributes."""
-
+        Returns:
+            _type_: Transformed data (X, y)
+        """
         # Expand data
         x, y = data
 
-        # Add Time to End and Truncate if needed
-        x_inter = self._add_time_to_end(x)
-        x_inter = self._truncate(x_inter)
-        self._check_correct_time_conversion(x_inter)
+        # Apply Processing steps
+        x_inter = (
+            x.query("hours_to_end >= @self.ts_min")
+            .query("hours_to_end < @self.ts_max")
+            .loc[:, [self.id_col, self.time_col] + self.features]
+        )
 
-        # subset to relevant features (keeps self.id_col and self.time_col still)
-        x_subset, features = self.subset_to_features(x_inter)
+        # Processing checks
+        self._check_correct_time_conversion(x_inter)
+        self._data_matching_check(x_inter, y)
+
+        # --------------- Rest of the steps ----------------- #
 
         # Convert to 3D array
-        x_inter, pat_time_ids = self.convert_to_3darray(x_subset)
+        x_inter, pat_time_ids = self.convert_to_3darray(x_inter)
 
         # Normalize array
-        x_inter = self.normalize(x_inter)
+        self.nan_min = np.nanmin(x_inter, axis=0, keepdims=True)
+        self.nan_max = np.nanmax(x_inter, axis=0, keepdims=True)
+        x_inter = np.divide(x_inter - self.nan_min, self.nan_max - self.nan_min)
 
-        # Impute missing values
+        # Impute missing values (including where nan_max - nan_min = 0)
         x_out, mask = impute(x_inter)
 
         # Do things to y
-        outcomes = _get_outcome_names(self.dataset_name)
+        outcomes = _get_features(feat_set="outcomes", data_name=self.dataset_name)
         y_data = y[outcomes]
         y_out = y_data.to_numpy().astype("float32")
 
         # Check data loaded correctly
         _check_input_format(x_out, y_out)
 
-        return x_out, y_out, mask, pat_time_ids, features, outcomes, x_subset, y_data
-
-    def _add_time_to_end(self, X):
-        """Add new column to dataframe - this computes time to end of grouped observations, if needed."""
-        x_inter = X.copy(deep=True)
-
-        # if time to end has not been computed
-        if self.needs_time_to_end_computation is True:
-
-            # Compute datetime values for time until end of group of observations
-            times = X.groupby(self.id_col).apply(lambda x: x.loc[:, self.time_col].max() - x.loc[:, self.time_col])
-
-            # add column to dataframe after converting to hourly times.
-            x_inter["time_to_end"] = convert_datetime_to_hour(times).values
-
-        else:
-            x_inter["time_to_end"] = x_inter[self.time_col].values
-            x_inter["time_to_end"] = convert_datetime_to_hour(x_inter.loc[:, "time_to_end"])
-
-        # Sort data
-        self.time_col = "time_to_end"
-        x_out = x_inter.sort_values(by=[self.id_col, "time_to_end"], ascending=[True, False])
-
-        return x_out
-
-    def _truncate(self, X):
-        """Truncate dataset on time to end column according to self.time_range."""
-        try:
-            min_time, max_time = self.time_range
-            return X[X['time_to_end'].between(min_time, max_time, inclusive="left")]
-
-        except Exception:
-            raise ValueError(f"Could not truncate to {self.time_range} time range successfully")
+        return {
+            "data_arr": (x_out, y_out),
+            "data_og": (x, y),
+            "mask": mask,
+            "ids": pat_time_ids,
+        }
 
     def _check_correct_time_conversion(self, X):
         """Check addition and truncation of time index worked accordingly."""
 
-        cond1 = X[self.id_col].is_monotonic
-        cond2 = X.groupby(self.id_col).apply(lambda x: x["time_to_end"].is_monotonic_decreasing).all()
+        # Patients arranged by id col in increasing fashion
+        cond1 = X[self.id_col].is_monotonic_increasing
+        assert cond1
 
-        min_time, max_time = self.time_range
-        cond3 = X["time_to_end"].between(min_time, max_time, inclusive='left').all()
+        # Each patient has observation in decreasing order based on sampled time to end.
+        cond2 = (
+            X.groupby(self.id_col)
+            .apply(lambda x: x.time_col.is_monotonic_decreasing)
+            .all()
+        )
+        assert cond2
 
-        assert cond1 is True
-        assert cond2 == True
-        assert cond3 == True
+        # Endpoint of each patient admission is within the time range
+        cond3 = (
+            X["hours_to_end"].between(self.ts_min, self.ts_max, inclusive="left").all()
+        )
+        assert cond3
 
-    def subset_to_features(self, X):
-        """Subset only to variables which were selected"""
-        features = [self.id_col, "time_to_end"] + _get_features(self.feat_set, self.dataset_name)
+    def _data_matching_check(self, X, y):
+        """Check the patient order is correct before converting to 3D array."""
 
-        return X[features], features
+        # Get ids from both X and y
+        x_ids, y_ids = X[self.id_col].unique(), y[self.id_col]
+
+        # Ensure equality
+        assert np.all(x_ids == y_ids)
 
     def convert_to_3darray(self, X):
-        """Convert a pandas dataframe to 3D numpy array of shape (num_samples, num_timestamps, num_variables)."""
+        """
+        Convert a pandas dataframe to 3D numpy array of shape (num_samples, num_timestamps, num_variables).
+        
+        Params:
+        - X: pd.DataFrame with observations indexed by id_col, and time_col, attributes of object.
+        
+        Outputs:
+        - Tuple of arrays:
+            - x_array
+            - id_array
+        """
 
         # Obtain relevant shape sizes
-        max_time_length = X.groupby(self.id_col).count()["time_to_end"].max()
-        num_ids = X[self.id_col].nunique()
+        max_time_length = X.groupby(self.id_col).count()["hours_to_end"].max()
+        list_ids = X[self.id_col].unique()
+        num_ids = np.size(list_ids)
 
         # Other basic definitions
-        feats = [col for col in X.columns if col not in [self.id_col, "time_to_end"]]
-        list_ids = X[self.id_col].unique()
+        non_id_feats = [col for col in X.columns if col not in [self.id_col, self.time_col]]
 
-        # Initialise output array and id-time array
-        out_array = np.empty(shape=(num_ids, max_time_length, len(feats)))
+
+        # INITIALIZE OUTPUT ARRAYS
+        out_array = np.empty(shape=(num_ids, max_time_length, len(non_id_feats)))
         out_array[:] = np.nan
 
         # Make a parallel array indicating id and corresponding time
         id_times_array = np.empty(shape=(num_ids, max_time_length, 2))
 
         # Set ids in this newly generated array
-        id_times_array[:, :, 0] = np.repeat(np.expand_dims(list_ids, axis=-1), repeats=max_time_length, axis=-1)
+        id_times_array[:, :, 0] = np.repeat(
+            np.expand_dims(list_ids, axis=-1), repeats=max_time_length, axis=-1
+        )
 
         # Iterate through ids
         for id_ in tqdm(list_ids):
+
             # Subset data to where matches respective id
             index_ = np.where(list_ids == id_)[0]
             x_id = X[X[self.id_col] == id_]
 
             # Compute negative differences instead of keeping the original times.
             x_id_copy = x_id.copy()
-            x_id_copy["time_to_end"] = - x_id["time_to_end"].diff().values
+            x_id_copy["time_to_end"] = -x_id["time_to_end"].diff().values
 
             # Update target output array and time information array
-            out_array[index_, :x_id_copy.shape[0], :] = x_id_copy[feats].values
-            id_times_array[index_, :x_id_copy.shape[0], 1] = x_id["time_to_end"].values
+            out_array[index_, : x_id_copy.shape[0], :] = x_id_copy[non_id_feats].values
+            id_times_array[index_, : x_id_copy.shape[0], 1] = x_id["time_to_end"].values
 
         return out_array.astype("float32"), id_times_array.astype("float32")
-
-    def normalize(self, X):
-        """Given 3D array, normalize according to min-max method."""
-        self.min = np.nanmin(X, axis=0, keepdims=True)
-        self.max = np.nanmax(X, axis=0, keepdims=True)
-
-        return np.divide(X - self.min, self.max - self.min)
-
-    def apply_normalization(self, X):
-        """Apply normalization with current parameters to another dataset."""
-        if self.min is None or self.max is None:
-            raise ValueError(f"Attributes min and/or max are not yet computed. Run 'normalize' method instead.")
-
-        else:
-            return np.divide(X - self.min, self.max - self.min)
