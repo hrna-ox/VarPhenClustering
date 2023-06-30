@@ -564,7 +564,7 @@ class DataLoader(DataTransformer):
             X_test_norm = self.apply_normalization(X_test)
 
             # Save dictionaries for output
-            output_dic["fold_1"] = {
+            output_dic["CV_folds"]["fold_1"] = {
                     "X": (X_train_norm, X_val_norm, X_test_norm),
                     "y": (y_train, y_val, y_test),
                     "ids": (ids_train, ids_val, ids_test),
@@ -593,7 +593,7 @@ class DataLoader(DataTransformer):
                 X_test_norm = self.apply_normalization(X_test)
 
                 # Save dictionaries as output
-                output_dic[f"fold_{fold_id+1}"] = {
+                output_dic["CV_folds"][f"fold_{fold_id+1}"] = {
                     "X": (X_train_norm, X_val_norm, X_test_norm),
                     "y": (y_train, y_val, y_test),
                     "ids": (ids_train, ids_val, ids_test),

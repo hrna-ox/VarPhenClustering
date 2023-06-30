@@ -179,8 +179,7 @@ class DirVRNN(nn.Module):
     # Define training process for this class.
     def forward(self, x, y) -> Tuple[torch.Tensor, Dict]:
         """
-        Model loss computation given batch objects during training. Note that we implement 
-        a window size within our model itself. Time alignment is checked through pre-processing.
+        Forward Pass computation for a single pair of batch objects x and y.
 
         Params:
             - x: pytorch Tensor object of input data with shape (batch_size, max_seq_len, input_size);
@@ -192,12 +191,14 @@ class DirVRNN(nn.Module):
         """
 
         # ========= Define relevant variables and initialise variables ===========
-
         x, y = x.to(self.device), y.to(self.device) # move data to device
 
         # Extract dimensions
         batch_size, seq_len, input_size = x.size()
-        num_time_steps = int(seq_len / self.w_size)
+
+        assert seq_len % self.w_size == 0 # Sequence length must be divisible by window size
+        num_time_steps = int(seq_len / self.w_size) + 1
+
 
         # Initialize the current hidden state as the null vector
         h = torch.zeros(batch_size, self.l_size, device=self.device)
@@ -207,20 +208,24 @@ class DirVRNN(nn.Module):
         est_z = model_utils.gen_samples_from_assign(est_pi, self.c_means, self.log_c_vars)
                 
 
-        # Initialise loss value and history dictionary
-        ELBO, history = 0, {}
-        history["loss_loglik"] = torch.zeros(num_time_steps, device=x.device)
-        history["loss_kl"] = torch.zeros(num_time_steps, device=x.device)
-        history["loss_out"] = 0
+        # Initialise loss value and history dictionary for tracking
+        ELBO = 0
+        history = {
+            "loss_loglik": torch.zeros(num_time_steps, device=x.device),
+            "loss_kl": torch.zeros(num_time_steps, device=x.device),
+            "loss_out": 0,
+            "pis": torch.zeros(batch_size, seq_len, self.K, device=self.device),
+            "zs": torch.zeros(batch_size, seq_len, self.l_size, device=self.device),
+            "alpha_encs": torch.zeros(batch_size, seq_len, self.K, device=self.device),
+            "mugs": torch.zeros(batch_size, seq_len, self.i_size, device=self.device),
+            "log_vargs": torch.zeros(batch_size, seq_len, self.i_size, device=self.device)
+        }
 
-        # Tracker for intermediate objects
-        history["pis"] = torch.zeros(batch_size, seq_len, self.K, device=self.device)
-        history["zs"] = torch.zeros(batch_size, seq_len, self.l_size, device=self.device)
-        history["alpha_encs"] = torch.zeros(batch_size, seq_len, self.K, device=self.device)
-        history["mugs"] = torch.zeros(batch_size, seq_len, self.i_size, device=self.device)
-        history["log_vargs"] = torch.zeros(batch_size, seq_len, self.i_size, device=self.device)
+
+
 
         # ================== Iteration through time-steps ==============
+
         # Can also edit this to use a sliding window approach, where t goes from 0 to seq_len - w_size
         for window_id in range(num_time_steps):
             "Iterate through each window block"
@@ -303,60 +308,55 @@ class DirVRNN(nn.Module):
 
         return (-1) * ELBO, history      # want to maximize loss, so return negative loss
     
-    def fit(self, data_info, train_info, run_config):
+    def fit(self, 
+            train_data, val_data=(None, None),
+            K_fold_idx: int = 1,
+            lr: float = 0.001, 
+            batch_size: int = 32,
+            num_epochs: int = 100
+        ):
         """
-        Train model given data_dic with data information, and training parameters.
+        Method to train model given train and validation data, as well as training parameters.
 
         Params:
-            - data_info: dictionary with data information. Includes keys:
-                a) 'X' - with triple (X_train, X_val, X_test) of observation data;
-                b) 'y' - with triple (y_train, y_val, y_test) of outcome data;
-                c) 
-            - train_info: dictionary with training information. Includes keys:
-                a) 'batch_size' - batch size for training;
-                b) 'num_epochs' - number of epochs to train for;
-                c) 'lr' - learning rate for training;
-            - run_config: parameters used for loading data, model and training.
+            - train_data: Tuple (X, y) of training data, with shape (N, T, D) and (N, O), respectively.
+            - val_data: Tuple (X, y) of validation data. If None or (None, None), then no validation is performed.
+            - K_fold_idx: index of current fold in K-fold cross-validation. If no Cross validation, then this parameter is set to 1.
+            - lr: learning rate for optimizer.
+            - batch_size: batch size for training.
+            - num_epochs: number of epochs to train for.
 
         Outputs:
             - loss: final loss value.
             - history: dictionary with training history, including each loss component.
         """
-        # Set Weights and Biases Logger
-        run_name, model_name = run_config['run_name'], run_config["model_config"]["model_name"]
-        data_name = data_info['data_load_config']['data_name']
-        wandb.init(
-                name= "{}-{}-{}".format(model_name, data_name, run_name),
-                entity="hrna-ox", 
-                dir=f"exps/Dir_VRNN/{data_info['data_load_config']['data_name']}",
-                project="Dir_VRNN", 
-                config=run_config
-            )
 
         # Unpack data and make data loaders
-        X_train, X_val, _ = data_info['X']
-        y_train, y_val, _ = data_info['y']
-
-        # Unpack train parameters
-        batch_size, epochs, lr = train_info['batch_size'], train_info['num_epochs'], train_info['lr']
+        X_train, y_train = train_data
+        X_val, y_val = val_data
 
         # Prepare data for training
         train_dataset = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-        # Define optimizer
+        # Define optimizer and Logging
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        wandb.watch(self, log="all", log_freq=1)
+        wandb.watch(
+                models=self, 
+                log="all", 
+                log_freq=1, 
+                idx = K_fold_idx
+            )
 
         # ================== TRAINING-VALIDATION LOOP ==================
-        for epoch in range(1, epochs + 1):
+        for epoch in range(1, num_epochs + 1):
 
             # Set model to train mode and initialize loss tracker
             self.train()
-            train_loss = 0
-            train_loglik = 0
-            train_kl = 0
-            train_out = 0
+            train_loss = torch.zeros(1, device=self.device)
+            train_loglik = torch.zeros(1, device=self.device)
+            train_kl = torch.zeros(1, device=self.device)
+            train_out = torch.zeros(1, device=self.device)
 
             # Iterate through batches
             for batch_id, (x, y) in enumerate(train_loader):
@@ -378,18 +378,19 @@ class DirVRNN(nn.Module):
                 train_kl += batch_kl
                 train_out += batch_out
 
-                # Print message
+                # Print message of loss per batch, which is re-setted at the end of each epoch
                 print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
                     epoch, loss.item(), 100. * batch_id / len(train_loader)),
                     end="\r")
                 
-            # Print message at the end of epoch
-            epoch_loglik = torch.sum(train_loglik) # type: ignore
-            epoch_kl = torch.sum(train_kl) # type: ignore
-            epoch_out = torch.mean(train_out) # type: ignore
+            # Print message at the end of epoch 
+            epoch_loglik = torch.sum(train_loglik) / len(train_loader) 
+            epoch_kl = torch.sum(train_kl) / len(train_loader)
+            epoch_out = torch.mean(train_out) / len(train_loader)
 
+            # Print Message at the end of each epoch with the main loss and all auxiliary loss functions
             print("Train epoch {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
-                epoch, 100, 
+                epoch + 1, 100, 
                 train_loss, epoch_loglik, epoch_kl, epoch_out))
                 
             
@@ -404,8 +405,9 @@ class DirVRNN(nn.Module):
             step=epoch+1
         )	
             
-            # Check performance on validation set
-            self.validate(X_val, y_val, epoch=epoch)
+            # Check performance on validation set if exists
+            if X_val is not None and y_val is not None:
+                self.validate(X_val, y_val, epoch=epoch)
     
     def validate(self, X, y, epoch: int):
         """

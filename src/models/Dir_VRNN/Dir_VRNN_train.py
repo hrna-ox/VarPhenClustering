@@ -26,6 +26,9 @@ def main():
         run_config = json.load(f)
         f.close()
 
+    # Extract some key info
+    model_name, data_name, run_name = run_config["model_name"], run_config["data_name"], run_config["run_name"]
+
     # GPU and model setting
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -37,6 +40,14 @@ def main():
     # Set torch seed for any probability computation
     torch.manual_seed(run_config["seed"])
 
+    # Initialize WandB Session for logging metrics, results and model weights 
+    wandb.init(
+        name= "{}-{}-{}".format(model_name, data_name, run_name),
+        entity="hrna-ox", 
+        dir=f"exps/Dir_VRNN/{data_name}/{run_name}/",
+        project="Dir_VRNN", 
+        config=run_config
+    )
 
 
     # Load Data
@@ -52,37 +63,65 @@ def main():
         K_folds=run_config["K_folds"]
     )
 
-    # Get model
-    model = DirVRNN(**model_config, device=device).to(device) # type: ignore
-
     # Train model on data
-    print("\n\nTraining model...\n\n")
+    print("\n\nTraining model\n\n")
+    print("Training with K={} folds".format(run_config["K_folds"]))
 
-    model.fit(data_info=data_info, train_info=training_config, run_config=run_config)
+    # Iterate over folds
+    for idx, data_arrs in enumerate(data_dic["CV_folds"]):
 
-    # Save Model 
-    save_fd = "exps/Dir_VRNN/{}/{}".format(data_config["data_name"], run_config["run_name"])
-    if not os.path.exists(save_fd):
-        os.makedirs(save_fd)
-        
-    torch.save(model.state_dict(), save_fd + "/model.h5")
-    # wandb.save(save_fd + "/model.h5")
+        # Load model
+        model = DirVRNN(
+            i_size=run_config["i_size"],
+            o_size=run_config["o_size"],
+            w_size=run_config["w_size"],
+            K=run_config["K"],
+            l_size=run_config["l_size"],
+            gate_hidden_l=run_config["gate_hidden_l"],
+            gate_hidden_n=run_config["gate_hidden_n"],
+            bias=run_config["bias"],
+            dropout=run_config["dropout"],
+            seed=run_config["seed"]  
+        ).to(device) # type: ignore
+
+        # Access Data
+        x_train, x_val, x_test = data_arrs["X"]
+        y_train, y_val, y_test = data_arrs["y"]
+
+        # Train Model on Train and Val Data
+        model.fit(
+            train_data=(x_train, y_train),
+            val_data=(x_val, y_val),
+            K_fold_idx=idx+1,
+            lr=run_config["lr"],
+            batch_size=run_config["batch_size"],
+            num_epochs=run_config["num_epochs"],
+        )
+
+            
+        # Save Model 
+        save_fd = "exps/Dir_VRNN/{}/{}".format(data_config["data_name"], run_config["run_name"])
+        if not os.path.exists(save_fd):
+            os.makedirs(save_fd)
+            
+        torch.save(model.state_dict(), save_fd + "/model.h5")
+        # wandb.save(save_fd + "/model.h5")
 
 
-    # Run on Test data
-    print("\n\nRunning model on test data...\n\n")
+        # Run on Test data
+        print("\n\nRunning model on test data...\n\n")
 
-    # Prepare Test Data
-    X_test = torch.Tensor(data_info["X"][-1], device=device)
-    y_test = torch.Tensor(data_info["y"][-1], device=device)
+        # Prepare Test Data
+        X_test = torch.Tensor(data_info["X"][-1], device=device)
+        y_test = torch.Tensor(data_info["y"][-1], device=device)
 
-    # Run model on test data
-    model.eval()
-    output_dic = model.predict(X_test, y_test, run_config=run_config)
+        # Run model on test data
+        model.eval()
+        output_dic = model.predict(X_test, y_test, run_config=run_config)
 
-    # Finish recording session and save outputs
-    wandb.finish()
-    torch.save(output_dic, save_fd + "/output_dic.h5")
+        # Finish recording session and save outputs
+        wandb.finish()
+        torch.save(output_dic, save_fd + "/output_dic.h5")
 
 # endregion
 
