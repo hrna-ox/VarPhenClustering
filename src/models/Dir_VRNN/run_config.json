@@ -1,28 +1,22 @@
 {
    "run_name": "test-5",
-   "data_config": {
-      "data_name": "MIMIC",
-      "target_window": 48,
-      "feat_set": "vit-sta",
-      "time_range": [0, 10],
-      "train_test_ratio": 0.6,
-      "train_val_ratio": 0.4,
-      "seed": 2323
-   },
-   "model_config": {
-      "model_name": "DirVRNN",
-      "i_size": 9, 
-      "o_size": 4, 
-      "w_size": 3,
-      "K": 6, 
-      "l_size": 64,
-      "gate_hidden_l": 4,
-      "gate_hidden_n": 20,
-      "seed": 2323
-   },
-   "training_config": {
-      "lr": 0.001,
-      "num_epochs": 3,
-      "batch_size": 256
-   }
+   "data_name":"MIMIC",
+   "feat_set": "vit-sta",
+   "ts_endpoints": [0, 10],
+   "model_name": "DirVRNN",
+   "i_size": 9, 
+   "o_size": 4, 
+   "w_size": 3,
+   "K": 6, 
+   "l_size": 64,
+   "gate_hidden_l": 4,
+   "gate_hidden_n": 20,
+   "lr": 0.001,
+   "num_epochs": 3,
+   "batch_size": 256,
+   "train_val_ratio": 0.6,
+   "train_ratio": 0.4,
+   "shuffle": true,
+   "K_folds": 1,
+   "seed": 2323
 }

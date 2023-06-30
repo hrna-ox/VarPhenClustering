@@ -202,14 +202,14 @@ class CSVLoader:
     def __init__(
         self,
         data_name: str,
+        **kwargs,
     ):
         """
         Class Object Initializer.
 
         Params:
             - data_name: ('HAVEN', 'MIMIC', ...)
-            - feat_set: str or List. Set of features to consider for input data.
-            - time_range: tuple of floats, for each admission, subset observations within the two endpoints indicated in time_range.
+            - **kwargs: additional arguments to be passed to the class (added only for compatibility)
         """
 
         # Save parameters
@@ -482,7 +482,8 @@ class DataLoader(DataTransformer):
         train_val_ratio: float = 0.6,
         train_ratio: float = 0.7,
         shuffle: bool = True,
-        K_folds: int = 5,
+        K_folds: int = 1,
+        **kwargs
     ):
         """
         Main method for Class. Prepare exact data input format as required by the separate models.
@@ -493,6 +494,7 @@ class DataLoader(DataTransformer):
         - train_ratio: float, proportion of the training + validation data that is actually fed to the model for training.
         - shuffle: bool, whether to shuffle the data
         - K_folds: int, number of folds to use for (Stratified) cross validation. If 1, then no cross validation is used.
+        - kwargs: dict, additional arguments to be passed for compatibility.
         """
 
         # Load data dictionary with extracted data and unpack
