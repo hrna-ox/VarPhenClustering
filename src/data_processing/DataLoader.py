@@ -6,13 +6,14 @@ Utility Functions for Loading Data and Saving/Evaluating Results.
 # Import Functions
 import os
 from typing import Union, List, Tuple
+import pickle
 
 import numpy as np
 import pandas as pd
 
 from tqdm import tqdm
+from sklearn.model_selection import train_test_split, StratifiedKFold
 
-from src.data_processing.MIMIC.data_utils import convert_to_timedelta
 
 # ---------------------------------------------------------------------------------------
 "Global variables for specific dataset information loading."
@@ -24,6 +25,7 @@ HAVEN_FEATURES = {
     "SERUM": ["HGB", "WBC", "EOS", "BAS", "NEU", "LYM"],
     "BIOCHEM": ["ALB", "CR", "CRP", "POT", "SOD", "UR"],
     "OUTCOMES": ["Healthy", "Death", "ICU", "Card"],
+    "TIME_WINDOW": 4
 }
 
 # MIMIC Data
@@ -31,13 +33,14 @@ MIMIC_FEATURES = {
     "VITALS": ["TEMP", "HR", "RR", "SPO2", "SBP", "DBP"],
     "STATIC": ["age", "gender", "ESI"],
     "OUTCOMES": ["Death", "ICU", "Ward", "Discharge"],
+    "TIME_WINDOW": 1
 }
 
 # ----------------------------------------------------------------------------------------
 "Useful functions to define"
 
 
-def _get_features(feat_set, data_name: str):
+def _get_features(feat_set: Union[str, List[str]], data_name: str) -> List[str]:
     """
     Obtain the list of features to subset.
 
@@ -144,7 +147,9 @@ def _median_fill(array):
 
     # Compute median and impute
     array_med = np.nanmedian(
-        np.nanmedian(array, axis=0, keepdims=True), axis=1, keepdims=True
+        np.nanmedian(array, axis=0, keepdims=True), 
+        axis=1, 
+        keepdims=True
     )
     array_out = np.where(array_mask, array_med, array_out)
 
@@ -187,36 +192,6 @@ def _check_input_format(X, y):
 # ---------------------------------------------------------------------------------------
 "Main Class for Data Processing."
 
-
-def _subset_to_balanced(X, y, mask, ids):
-    """Subset samples so dataset is more well sampled."""
-    class_numbers = np.sum(y, axis=0)
-    largest_class, target_num_samples = (
-        np.argmax(class_numbers),
-        np.sort(class_numbers)[-2],
-    )
-    print(
-        "\nSub-setting class {} from {} to {} samples.".format(
-            largest_class, class_numbers[largest_class], target_num_samples
-        )
-    )
-
-    # Select random
-    largest_class_ids = np.arange(y.shape[0])[y[:, largest_class] == 1]
-    class_ids_samples = np.random.choice(
-        largest_class_ids, size=target_num_samples, replace=False
-    )
-    ids_to_remove_ = np.setdiff1d(largest_class_ids, class_ids_samples)
-
-    # Remove relevant ids
-    X_out = np.delete(X, ids_to_remove_, axis=0)
-    y_out = np.delete(y, ids_to_remove_, axis=0)
-    mask_out = np.delete(mask, ids_to_remove_, axis=0)
-    ids_out = np.delete(ids, ids_to_remove_, axis=0)
-
-    return X_out, y_out, mask_out, ids_out
-
-
 class CSVLoader:
     """
     Loader Class for loading data from CSV files.
@@ -227,8 +202,6 @@ class CSVLoader:
     def __init__(
         self,
         data_name: str,
-        feat_set: Union[str, List],
-        time_range: Tuple[float, float] = (0, 10000),
     ):
         """
         Class Object Initializer.
@@ -241,8 +214,6 @@ class CSVLoader:
 
         # Save parameters
         self.data_name = data_name.upper()
-        self.features = feat_set
-        self.time_range = time_range
         self.id_col = "stay_id"
         self.time_col = "sampled_time_to_end"
 
@@ -294,8 +265,7 @@ class CSVLoader:
 
         return X, y
 
-
-def DataTransformer(CSVLoader):
+class DataTransformer(CSVLoader):
     """
     Transformer Class for transforming data loaded from CSV.
     """
@@ -316,9 +286,7 @@ def DataTransformer(CSVLoader):
         """
         self.ts_min, self.ts_max = ts_endpoints
         self.features = _get_features(feat_set, self.data_name)
-
-        # Other parameters to keep track during transformation
-        self.nan_min, self.nan_max = 0, 0
+        self.outcomes = _get_features("outcomes", self.data_name)
 
         # Call parent class
         super(CSVLoader, self).__init__(*args, **kwargs)
@@ -331,53 +299,80 @@ def DataTransformer(CSVLoader):
             - Conversion to 3D array.
             - Normalization.
             - Imputation.
+
+        If data has been previously computed, then we simply load the data as is.
         Params:
             data (Tuple[DF_LIKE, DF_LIKE]): Tuple (X, y) of DF-like data for input variables (X), and outcome variables (y).
 
         Returns:
             _type_: Transformed data (X, y)
         """
-        # Expand data
-        x, y = data
 
-        # Apply Processing steps
-        x_inter = (
-            x.query("hours_to_end >= @self.ts_min")
-            .query("hours_to_end < @self.ts_max")
-            .loc[:, [self.id_col, self.time_col] + self.features]
-        )
+        # Load if previously computed
+        data_fd = f"data/{self.data_name}/processed/ts_{self.ts_min}_{self.ts_max}_feats_{''.join(self.features)}/"
 
-        # Processing checks
-        self._check_correct_time_conversion(x_inter)
-        self._data_matching_check(x_inter, y)
+        if os.path.exists(data_fd):
 
-        # --------------- Rest of the steps ----------------- #
+            # Load data from pickle file
+            with open(data_fd + "data_transformed.pkl", "rb") as f:
+                data_dic = pickle.load(f)
+        
+        # Else compute data
+        else:
+                
+            # Expand data
+            x, y = data
 
-        # Convert to 3D array
-        x_inter, pat_time_ids = self.convert_to_3darray(x_inter)
+            # Apply Processing steps
+            x_inter = (
+                x.query("hours_to_end >= @self.ts_min")
+                .query("hours_to_end < @self.ts_max")
+                .loc[:, [self.id_col, self.time_col] + self.features]
+            )
 
-        # Normalize array
-        self.nan_min = np.nanmin(x_inter, axis=0, keepdims=True)
-        self.nan_max = np.nanmax(x_inter, axis=0, keepdims=True)
-        x_inter = np.divide(x_inter - self.nan_min, self.nan_max - self.nan_min)
+            # Processing checks
+            self._check_correct_time_conversion(x_inter)
+            self._data_matching_check(x_inter, y)
 
-        # Impute missing values (including where nan_max - nan_min = 0)
-        x_out, mask = impute(x_inter)
+            # --------------- Rest of the steps ----------------- #
 
-        # Do things to y
-        outcomes = _get_features(feat_set="outcomes", data_name=self.dataset_name)
-        y_data = y[outcomes]
-        y_out = y_data.to_numpy().astype("float32")
+            # Convert to 3D array
+            x_inter, pat_time_ids = self.convert_to_3darray(x_inter)
 
-        # Check data loaded correctly
-        _check_input_format(x_out, y_out)
+            # Impute missing values and get mask
+            x_out, mask = impute(x_inter)
 
-        return {
-            "data_arr": (x_out, y_out),
-            "data_og": (x, y),
-            "mask": mask,
-            "ids": pat_time_ids,
-        }
+            # Do things to y
+            outcomes = _get_features(feat_set="outcomes", data_name=self.data_name)
+            y_data = y[outcomes]
+            y_out = y_data.to_numpy().astype("float32")
+
+            # Check data loaded correctly
+            _check_input_format(x_out, y_out)
+
+            # Save data so we do not need to reprocess again for future runs
+            if not os.path.exists(data_fd):
+                os.makedirs(data_fd)
+    
+            data_dic = {
+                "data_arr": (x_out, y_out),
+                "data_og": (x, y),
+                "mask": mask,
+                "ids": pat_time_ids,
+            }
+
+            with open(data_fd + "data_transformed.pkl", "wb") as f:
+                pickle.dump(data_dic, f)
+
+        return data_dic
+
+    def load_transform(self):
+        """
+        Combine Load and transformation methods into a single method.
+        """
+        data = self.load_from_csv()
+        data_dic = self.transform(data)
+        return data_dic
 
     def _check_correct_time_conversion(self, X):
         """Check addition and truncation of time index worked accordingly."""
@@ -459,3 +454,179 @@ def DataTransformer(CSVLoader):
             id_times_array[index_, : x_id_copy.shape[0], 1] = x_id["time_to_end"].values
 
         return out_array.astype("float32"), id_times_array.astype("float32")
+
+class DataLoader(DataTransformer):
+    """
+    Class to prepare data being passed to different inputs. Builds on Data Transformer class by adding methods relevant to:
+    a) Train test Split
+    b) Data batching
+    c) Pytorch Data Loader features (relevant to Deep Learning)_
+    """
+    def __init__(self, *args, **kwargs):
+
+        # Call parent class
+        super(DataLoader, self).__init__(*args, **kwargs)
+
+        # Initialise some empty attributes
+        self.train_test_ratio = None
+        self.train_val_ratio = None
+        self.seed = None
+        self._dataloader_fmt = None
+
+        # Other parameters to keep track during transformation
+        self.nan_min, self.nan_max = 0, 0
+
+    def prepare_input(
+        self,
+        seed: int,
+        train_val_ratio: float = 0.6,
+        train_ratio: float = 0.7,
+        shuffle: bool = True,
+        K_folds: int = 5,
+    ):
+        """
+        Main method for Class. Prepare exact data input format as required by the separate models.
+
+        Params:
+        - seed: int, random seed for reproducibility
+        - train_val_ratio: float, proportion of the whole data that is used as train or val data
+        - train_ratio: float, proportion of the training + validation data that is actually fed to the model for training.
+        - shuffle: bool, whether to shuffle the data
+        - K_folds: int, number of folds to use for (Stratified) cross validation. If 1, then no cross validation is used.
+        """
+
+        # Load data dictionary with extracted data and unpack
+        data_dic = self.load_transform()
+        x_og, y_og = data_dic["data_og"]
+        x_arr, y_arr = data_dic["data_arr"]
+        mask, ids = data_dic["mask"], data_dic["ids"]
+
+        # Prepare data dictionary for output saving
+        load_config = {
+            "data_name": self.data_name,
+            "id_col": self.id_col,
+            "time_col": self.time_col,
+            "features": self.features,
+            "outcomes": self.outcomes,
+            "ts_endpoints": (self.ts_min, self.ts_max),
+            "train_val_ratio": train_val_ratio,
+            "train_ratio": train_ratio,
+            "seed": seed,
+            "shuffle": shuffle,
+        }
+        output_dic = {
+            "load_config": load_config, 
+            "data_og": (x_og, y_og)
+        }
+
+        # Print some base information
+        print(f"""
+            Data {self.data_name} successfully loaded for features {self.features} and outcomes {self.outcomes}.
+            (X, y) shape: {x_arr.shape}, {y_arr.shape}
+            Outcome Distribution: {y_og.sum(axis=0).astype(int)}
+            """
+        )  
+        
+        # Separate into train-test data
+        (
+            X_train_val, X_test,
+            y_train_val, y_test,
+            ids_train_val, ids_test,
+            mask_train_val, mask_test) = train_test_split(
+                x_arr, y_arr, ids, mask,
+                train_size=train_val_ratio,
+                shuffle=shuffle,
+                random_state=seed,
+                stratify=np.argmax(y_arr, axis=-1)        # ensure that data split is stratified according to outcome data.
+        )
+
+        # Consider 2 scenarios: no K-fold validation, or K-fold validation
+        if K_folds == 1:
+                
+            # Separate into train-val data
+            (
+                X_train, X_val,
+                y_train, y_val,
+                ids_train, ids_val,
+                mask_train, mask_val) = train_test_split(
+                    X_train_val, y_train_val, ids_train_val, mask_train_val,
+                    train_size=train_ratio,
+                    shuffle=shuffle,
+                    random_state=seed,
+                    stratify=np.argmax(y_train_val, axis=-1)        # ensure that data split is stratified according to outcome data.
+            )
+
+            # Update input vectors according to normalization
+            X_train_norm = self.normalize(X_train)
+            X_val_norm = self.apply_normalization(X_val)
+            X_test_norm = self.apply_normalization(X_test)
+
+            # Save dictionaries for output
+            output_dic["fold_1"] = {
+                    "X": (X_train_norm, X_val_norm, X_test_norm),
+                    "y": (y_train, y_val, y_test),
+                    "ids": (ids_train, ids_val, ids_test),
+                    "mask": (mask_train, mask_val, mask_test),
+                    "nan_bounds": (self.nan_min, self.nan_max)
+                }
+        
+        else:    # Run Stratified Cross Validation, note test data is fixed
+
+            # Initialise K-fold cross validation and iterate
+            skf = StratifiedKFold(n_splits=K_folds, shuffle=shuffle, random_state=seed)
+            stratified_y = np.argmax(y_train_val, axis=-1)
+
+            # Iterate over folds
+            for fold_id, (train_index, val_index) in enumerate(skf.split(X_train_val, stratified_y)):
+
+                # Apply indices to get train, val, data
+                X_train, X_val = X_train_val[train_index, :, :], X_train_val[val_index, :, :]
+                y_train, y_val = y_train_val[train_index, :], y_train_val[val_index, :]
+                ids_train, ids_val = ids_train_val[train_index, :, :], ids_train_val[val_index, :, :]
+                mask_train, mask_val = mask_train_val[train_index, :, :], mask_train_val[val_index, :, :]
+
+                # Update input vectors according to normalization
+                X_train_norm = self.normalize(X_train)
+                X_val_norm = self.apply_normalization(X_val)
+                X_test_norm = self.apply_normalization(X_test)
+
+                # Save dictionaries as output
+                output_dic[f"fold_{fold_id+1}"] = {
+                    "X": (X_train_norm, X_val_norm, X_test_norm),
+                    "y": (y_train, y_val, y_test),
+                    "ids": (ids_train, ids_val, ids_test),
+                    "mask": (mask_train, mask_val, mask_test),
+                    "nan_bounds": (self.nan_min, self.nan_max)
+                }
+
+        return output_dic
+
+    def normalize(self, X: np.ndarray):
+        """
+        Compute min and max values of input array, and normalize data according to min-max standardization.
+        """
+
+        # Get nan min and nan max (as they take into account missing values)
+        self.nan_min = np.nanmin(X, axis=0, keepdims=True)
+        self.nan_max = np.nanmax(X, axis=0, keepdims=True)
+
+        # Once min and max are computed, apply normalization
+        return self.apply_normalization(X)
+
+        return X_norm
+    
+    def apply_normalization(self, X: np.ndarray):
+        """
+        Apply normalization factors to input array. This normalizes data using the current values of min and max.
+        """
+
+        # Use np where to ensure that division by zero is avoided (where nan min == nan max, return np.nan, else 
+        # return normalized value)
+        X_norm = np.where(
+            self.nan_max != self.nan_min,
+            (X - self.nan_min) / (self.nan_max - self.nan_min),
+            np.nan
+        )
+
+        return X_norm
+    

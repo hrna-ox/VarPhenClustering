@@ -12,7 +12,7 @@ import os
 import torch
 import wandb
 
-from src.data_processing.data_loader import data_loader
+from src.data_processing.DataLoader import DataLoader
 from src.models.Dir_VRNN.model import DirVRNN
 
 # endregion
