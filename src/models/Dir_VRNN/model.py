@@ -188,6 +188,16 @@ class DirVRNN(nn.Module):
         Output:
             - loss: pytorch Tensor object of loss value.
             - history: dictionary of relevant training history.
+
+        We iterate over consecutive window time blocks. Within each window, we use the hidden state obtained at
+        the last time window, and we generate mean and variance values for the subsequent window. Within the following
+        window, we also use the true data and last hidden state to generate alpha and estimate zs values for
+        each time step.
+
+        Loss is computed by summing a) Log Lik loss (how good we are at predicting data), b) KL loss (how close
+        the updated alpha approximates the posterior, and c) outcome loss, taken at the last time step, which 
+        indicates whether we are able to predict the outcome correctly. Losses are computed at each time step
+        for all windows except the latter, as it denotes a 'look' into the future.
         """
 
         # ========= Define relevant variables and initialise variables ===========
@@ -196,45 +206,44 @@ class DirVRNN(nn.Module):
         # Extract dimensions
         batch_size, seq_len, input_size = x.size()
 
+        # Basic information about the sequence and number of time-steps
         assert seq_len % self.w_size == 0 # Sequence length must be divisible by window size
-        num_time_steps = int(seq_len / self.w_size) + 1
+        num_time_steps = int(seq_len / self.w_size)
 
 
-        # Initialize the current hidden state as the null vector
+        # Initialization of pi, z, and h assignments
         h = torch.zeros(batch_size, self.l_size, device=self.device)
-
-        # Initialise probability of cluster assignment as uniform
         est_pi = torch.ones(batch_size, self.K, device=self.device) / self.K
         est_z = model_utils.gen_samples_from_assign(est_pi, self.c_means, self.log_c_vars)
                 
 
-        # Initialise loss value and history dictionary for tracking
+        # Initialise of Loss and History Tracker Objects - note time length includes forward prediction window
         ELBO = 0
         history = {
-            "loss_loglik": torch.zeros(num_time_steps, device=x.device),
-            "loss_kl": torch.zeros(num_time_steps, device=x.device),
+            "loss_loglik": torch.zeros(seq_len, device=x.device),
+            "loss_kl": torch.zeros(seq_len, device=x.device),
             "loss_out": 0,
-            "pis": torch.zeros(batch_size, seq_len, self.K, device=self.device),
-            "zs": torch.zeros(batch_size, seq_len, self.l_size, device=self.device),
-            "alpha_encs": torch.zeros(batch_size, seq_len, self.K, device=self.device),
-            "mugs": torch.zeros(batch_size, seq_len, self.i_size, device=self.device),
-            "log_vargs": torch.zeros(batch_size, seq_len, self.i_size, device=self.device)
+            "pis": torch.zeros(batch_size, seq_len + self.w_size, self.K, device=self.device),
+            "zs": torch.zeros(batch_size, seq_len + self.w_size, self.l_size, device=self.device),
+            "alpha_encs": torch.zeros(batch_size, seq_len + self.w_size, self.K, device=self.device),
+            "mugs": torch.zeros(batch_size, seq_len + self.w_size, self.i_size, device=self.device),
+            "log_vargs": torch.zeros(batch_size, seq_len + self.w_size, self.i_size, device=self.device)
         }
 
 
 
 
-        # ================== Iteration through time-steps ==============
+        # ================== Iteration through time-steps  ==============
 
-        # Can also edit this to use a sliding window approach, where t goes from 0 to seq_len - w_size
-        for window_id in range(num_time_steps):
+        # We iterate over all windows of our analysis, this includes the last window where we look into the future and do not compute losses.
+        for window_id in range(num_time_steps + 1):
             "Iterate through each window block"
 
             # Bottom and high indices
             lower_t, higher_t = window_id * self.w_size, (window_id + 1) * self.w_size
 
-            # First we estimate the observations for the incoming window given current cell state
-            h_dec, c_dec, data_gen = self.decoder_pass(h=h, z=est_z)
+            # First we estimate the observations for the incoming window given current estimates. This is of shape (bs, w_size, 2*input_size)
+            _, _, data_gen = self.decoder_pass(h=h, z=est_z)
 
             # Decompose obvs_pred into mean and log-variance - shape is (bs, T, 2 * input_size)
             mu_g, logvar_g = torch.chunk(data_gen, chunks=2, dim=-1)
@@ -246,52 +255,48 @@ class DirVRNN(nn.Module):
                 # Subset observation to time t
                 x_t = x[:, t, :]
 
-                # Compute alpha based on prior gate
-                alpha_prior = self.prior_out(self.prior(h)) + eps 
-
-                # Compute alpha of encoder network
+                # Compute alphas of prior and encoder networks
+                alpha_prior = self.prior_pass(h=h)
                 alpha_enc = self.encoder_pass(h=h, x=x_t)
 
 
-                # Sample cluster distribution from alpha_enc, and estimate samples from clusters
+                # Sample cluster distribution from alpha_enc, and estimate samples from clusters based on mixture of Gaussian model
                 est_pi = model_utils.sample_dir(alpha=alpha_enc)
                 est_z = model_utils.gen_samples_from_assign(
                     pi_assign=est_pi, 
                     c_means=self.c_means, 
                     log_c_vars=self.log_c_vars
                 )
-                # pi = torch.divide(alpha_enc, torch.sum(alpha_enc, dim=-1, keepdim=True))
-
-                # -------- COMPUTE LOSS FOR TIME t -----------
-
-                # Data Likelihood component
-                log_lik = LM_utils.torch_log_gaussian_lik(x_t, mu_g[:, _w_id, :], var_g[:, _w_id, :], device=self.device)
-
-                # Posterior KL-divergence component
-                kl_div = LM_utils.dir_kl_div(a1=alpha_enc, a2=alpha_prior)
-                # quot = torch.log(torch.divide(alpha_enc, alpha_prior + 1e-8) + 1e-8)
-                # kl_div = torch.mean(torch.sum(alpha_enc * quot, dim=-1))
-
-                # Add to loss tracker
-                ELBO += log_lik - kl_div
-
 
                 # ----- UPDATE CELL STATE ------
                 h = self.state_update_pass(h=h, x=x_t, z=est_z)
 
-                # Append losses to history trackers
-                history["loss_kl"][window_id] += torch.mean(kl_div, dim=0)
-                history["loss_loglik"][window_id] += torch.mean(log_lik, dim=0)
-
-                # Append objects
+                # Append objects FOR ALL TIME STEPS
                 history["pis"][:, t, :] = est_pi
                 history["zs"][:, t, :] = est_z
                 history["alpha_encs"][:, t, :] = alpha_enc
                 history["mugs"][:, t, :] = mu_g[:, _w_id, :]
                 history["log_vargs"][:, t, :] = logvar_g[:, _w_id, :]
 
+
+                # -------- COMPUTE LOSS FOR TIME t if time is not in the future ---------
+
+                if t < seq_len:
+                        
+                    # Compute log likelihood loss and KL divergence loss
+                    log_lik = LM_utils.torch_log_gaussian_lik(x_t, mu_g[:, _w_id, :], var_g[:, _w_id, :], device=self.device)
+                    kl_div = LM_utils.dir_kl_div(a1=alpha_enc, a2=alpha_prior)
+
+                    # Add to loss tracker
+                    ELBO += log_lik - kl_div
+
+                    # Append lOSSES TO HISTORY TRACKERS WITHIN THE ALLOWED SEQUENCE OF STEPS
+                    history["loss_kl"][t] += torch.mean(kl_div, dim=0)
+                    history["loss_loglik"][t] += torch.mean(log_lik, dim=0)
+
+
         # Once all times have been computed, make predictions on outcome
-        y_pred = self.predictor_out(self.predictor(est_z))
+        y_pred = self.predictor_pass(z=est_z)
         history["y_preds"] = y_pred
 
         # Compute log loss of outcome
@@ -305,6 +310,7 @@ class DirVRNN(nn.Module):
 
         # Append to history tracker
         history["loss_out"] += torch.mean(pred_loss)
+        history["ELBO"] = (-1) * ELBO
 
         return (-1) * ELBO, history      # want to maximize loss, so return negative loss
     
@@ -374,9 +380,9 @@ class DirVRNN(nn.Module):
 
                 # Add to loss tracker
                 train_loss += loss.item()
-                train_loglik += batch_loglik
-                train_kl += batch_kl
-                train_out += batch_out
+                train_loglik += torch.sum(batch_loglik)
+                train_kl += torch.sum(batch_kl)
+                train_out += torch.sum(batch_out)
 
                 # Print message of loss per batch, which is re-setted at the end of each epoch
                 print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
@@ -384,9 +390,9 @@ class DirVRNN(nn.Module):
                     end="\r")
                 
             # Print message at the end of epoch 
-            epoch_loglik = torch.sum(train_loglik) / len(train_loader) 
-            epoch_kl = torch.sum(train_kl) / len(train_loader)
-            epoch_out = torch.mean(train_out) / len(train_loader)
+            epoch_loglik = train_loglik / len(train_loader) 
+            epoch_kl = train_kl / len(train_loader)
+            epoch_out = train_out / len(train_loader)
 
             # Print Message at the end of each epoch with the main loss and all auxiliary loss functions
             print("Train epoch {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
@@ -435,9 +441,10 @@ class DirVRNN(nn.Module):
                 val_loss, history_objects = self.forward(X, y)
 
                 # Append to tracker
-                log_lik = torch.mean(history_objects["loss_loglik"])
-                kl_div = torch.mean(history_objects["loss_kl"])
-                out_l = torch.mean(history_objects["loss_out"])
+                log_lik = torch.sum(history_objects["loss_loglik"])
+                kl_div = torch.sum(history_objects["loss_kl"])
+                out_l = torch.sum(history_objects["loss_out"])
+                elbo = history_objects["ELBO"]
 
                 # Print message
                 print("Predict {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
@@ -466,8 +473,8 @@ class DirVRNN(nn.Module):
                 micro_f1 = LM_utils.f1_multiclass(y, y_pred, mode="micro")
 
                 # Compute confusion matrix, ROC and PR curves
-                pr_curve = wandb.plot.pr_curve(torch.argmax(y,dim=-1), y_pred, labels=["A", "B", "C", "D"])
-                roc_curve = wandb.plot.roc_curve(torch.argmax(y, dim=-1), y_pred, labels=["A", "B", "C", "D"])
+                pr_curve = wandb.plot.pr_curve(torch.argmax(y,dim=-1), y_pred, labels=["A", "B", "C", "D"]) # type:ignore
+                roc_curve = wandb.plot.roc_curve(torch.argmax(y, dim=-1), y_pred, labels=["A", "B", "C", "D"]) # type:ignore
             
                 # Log objects to Weights and Biases
                 wandb.log({
@@ -476,6 +483,7 @@ class DirVRNN(nn.Module):
                         "val/loglik": log_lik,
                         "val/kldiv": kl_div,
                         "val/out_l": out_l,
+                        "val/ELBO": elbo, 
                         "val/avg_clus_dist": avg_clus_dist,
                         #f"{epoch}/tsne_projs": wandb.plot(tsne_to_fmt, "dim 1", "dim 2", title="Cluster Means TSNE Projection"),
                         "val/acc": acc,
@@ -486,6 +494,9 @@ class DirVRNN(nn.Module):
                     },
                     step=epoch+1
                 )	        
+
+                # Log embeddings and other vectors
+
     
                 return val_loss, history_objects
 
@@ -579,7 +590,7 @@ class DirVRNN(nn.Module):
                 )
     
     def prior_pass(self, h):
-        return self.prior_out(self.prior(h))
+        return self.prior_out(self.prior(h)) + eps
 
     def predictor_pass(self, z):
         return self.predictor_out(self.predictor(z))
