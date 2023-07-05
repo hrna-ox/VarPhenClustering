@@ -8,6 +8,7 @@ intermediate object analysis.
 """
 
 # region =============== IMPORT LIBRARIES ===============
+import numpy as np
 import torch
 from torch.nn.functional import one_hot
 
@@ -251,6 +252,9 @@ def torch_get_temp_phens(pis_assign: torch.Tensor, y_true: torch.Tensor, mode: s
         y_true (torch.Tensor): of shape (N, O) with one-hot encoded true outcome labels.
         mode (str, optional, default="prob"): mode of computing the phenotype. Either "prob" (implements weighted pat contribution), or
             "one-hot" (implements one-hot pat contribution).
+
+    Returns:
+    - phens (torch.Tensor): of shape (K, T, O) with phenotype for each cluster over time. The sum over dimension 2 is 1.
     """
 
     # Check parameter is correct
@@ -333,7 +337,7 @@ def torch_plot_clus_prob_assign_time(temp_pis_assign: torch.Tensor):
 
     # Initialize figure and axis objects
     nrows, ncols = torch.ceil(K / torch.Tensor(2)).int(), 2
-    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10,5))
+    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10,5), sharex=True, sharey=True)
     axs = ax.flatten()
 
     # Iterate over clusters
@@ -351,4 +355,39 @@ def torch_plot_clus_prob_assign_time(temp_pis_assign: torch.Tensor):
         
     return fig, axs
 
+def torch_plot_phenotypes(phens: torch.Tensor, class_names=[]):
+    """
+    Make Bar Plots for Cluster Phenotyping Information to show how they evolve over time.
+
+    Args:
+        - phens: numpy array of shape (K, T, O), with cluster phenotypes over time, last dimension sums to 1.
+        - class_names: list of size 0 with class names (if empty, then make class names).
+
+    Returns:
+    - fig, ax: matplotlib figure and axis objects. For each plot, we plot the temporal evolution of cluster phenotypes.
+    """
+
+    # Get params and base information
+    K, T, O = phens.shape
+    if len(class_names) == 0:
+        class_names = [f"Class {i}" for i in range(O)]
+
+    # Initialize figure and axis objects
+    nrows, ncols = torch.ceil(K / torch.Tensor(2)).int(), 2
+    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10,5), sharex=True, sharey=True)
+    axs = ax.flatten()
+
+    # Iterate over clusters
+    for clus_idx in range(K):
+
+        # Iterate over time
+        for t in range(T):
+
+            
+
+        axs[clus_idx].set_xlabel("Class")
+        axs[clus_idx].set_ylabel("Prob")
+        axs[clus_idx].set_title(f"Cluster {clus_idx}")
+        
+    return fig, axs
 # endregion

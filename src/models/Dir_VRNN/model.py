@@ -6,12 +6,14 @@ Model file to define GC-DaPh class.
 """
 
 # ============= IMPORT LIBRARIES ==============
+import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import wandb
 
 from typing import Tuple, Dict, Union
-from torch.utils.data import DataLoader, TensorDataset, RandomSampler
+from torch.utils.data import DataLoader, TensorDataset
 
 import src.models.losses_and_metrics as LM_utils
 from src.models.deep_learning_base_classes import MLP, LSTM_Dec_v1, LSTM_Dec_v2
@@ -467,7 +469,7 @@ class DirVRNN(nn.Module):
                 )
 
                 # Log results
-                self.logger(y=y, log=history_objects, epoch=epoch, mode="val")
+                self.logger(X=X, y=y, log=history_objects, epoch=epoch, mode="val")
 
                 return val_loss, history_objects
 
@@ -523,7 +525,7 @@ class DirVRNN(nn.Module):
 
         return history_objects
     
-    def logger(self, y: torch.Tensor, log:Dict, epoch: int = 0, mode: str = "val", *args, **kwargs):
+    def logger(self, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch: int = 0, mode: str = "val", *args, **kwargs):
         """
         Logger for the model. 
 
@@ -615,44 +617,75 @@ class DirVRNN(nn.Module):
 
 
         # Log Performance Scores
-        y = y.detach().numpy()
+        y_npy = y.detach().numpy()
         y_pred = log["y_preds"].detach().numpy()
+        clus_prob = temp_pis.detach().numpy()
+        X_npy = X.detach().numpy()
+        class_names = [f"Class {i}" for i in range(y_pred.shape[-1])]
 
         # Compute accuracy, f1 and recall scores
-        acc = LM_utils.accuracy_score(y_true=y, y_pred=y_pred)
+        acc = LM_utils.accuracy_score(y_true=y_npy, y_pred=y_pred)
         
-        macro_f1 = LM_utils.macro_f1_score(y_true=y, y_pred=y_pred)
-        micro_f1 = LM_utils.micro_f1_score(y_true=y, y_pred=y_pred)
-        recall = LM_utils.recall_score(y_true=y, y_pred=y_pred)
-        precision = LM_utils.precision_score(y_true=y, y_pred=y_pred)
+        macro_f1 = LM_utils.macro_f1_score(y_true=y_npy, y_pred=y_pred)
+        micro_f1 = LM_utils.micro_f1_score(y_true=y_npy, y_pred=y_pred)
+        recall = LM_utils.recall_score(y_true=y_npy, y_pred=y_pred)
+        precision = LM_utils.precision_score(y_true=y_npy, y_pred=y_pred)
+
+        # Get roc and prc
+        roc_scores = LM_utils.get_roc_auc_score(y_true=y_npy, y_pred=y_pred)
+        prc_scores = LM_utils.get_pr_auc_score(y_true=y_npy, y_pred=y_pred)
 
         # Compute Confusion Matrix
-        confusion_matrix = LM_utils.get_confusion_matrix(y_true=y, y_pred=y_pred)
-        
+        confusion_matrix = LM_utils.get_confusion_matrix(y_true=y_npy, y_pred=y_pred)
+
         # Compute confusion matrix, ROC and PR curves
-        pr_curve = wandb.plot.pr_curve(torch.argmax(y,dim=-1), y_pred, labels=["A", "B", "C", "D"]) # type:ignore
-        roc_curve = wandb.plot.roc_curve(torch.argmax(y, dim=-1), y_pred, labels=["A", "B", "C", "D"]) # type:ignore
+        roc_fig, roc_ax = LM_utils.get_roc_curve(y_true=y_npy, y_pred=y_pred, class_names=[]) 
+        pr_curve = LM_utils.get_pr_curve(y_true=y_npy, y_pred=y_pred, class_names=[])
     
         # Compute Data Clustering Metrics
+        label_metrics = LM_utils.get_clustering_label_metrics(y_true=y_npy, clus_pred=clus_prob)
+        rand, nmi = label_metrics["rand"], label_metrics["nmi"]
+
+        # Compute Unsupervised Clustering Metrics
+        unsup_metrics = LM_utils.compute_unsupervised_metrics(X=X_npy, clus_pred=clus_prob, seed=self.seed)
+        sil, dbi, vri = unsup_metrics["sil"], unsup_metrics["dbi"], unsup_metrics["vri"]
+
+        # Combine scores to single table
+        single_output = pd.Series(
+            data = [acc, macro_f1, micro_f1, recall, precision],
+            index=["Accuracy", "Macro F1", "Micro F1", "Recall", "Precision"]
+        )
+
+        class_outputs = pd.DataFrame(
+            data=np.vstack((roc_scores, prc_scores)),
+            index=["ROC", "PRC"],
+            columns=class_names
+        )
         
+        temp_outputs = pd.DataFrame(
+            data=np.vstack((rand, nmi, sil, dbi, vri)),
+            index=["Rand", "NMI", "Silhouette", "DBI", "VRI"],
+            columns=list(range(X_npy.shape[1]))
+        )
 
-
-
-        # Log objects to Weights and Biases
+        # Log Objects
         wandb.log({
-                f"{mode}/avg_clus_dist": avg_clus_dist,
-                #f"{epoch}/tsne_projs": wandb.plot(tsne_to_fmt, "dim 1", "dim 2", title="Cluster Means TSNE Projection"),
-                f"{mode}/acc": acc,
-                f"{mode}/macro_f1": macro_f1,
-                f"{mode}/micro_f1": micro_f1,
-                f"{mode}/Precision_Recall": pr_curve,
-                f"{mode}/Receiver_Operating_Char": roc_curve
-            },
-            step=epoch+1
-        )	        
+            f"{mode}/confusion_matrix":
+                wandb.Table(data=confusion_matrix, columns=[f"True {_name}" for _name in class_names], 
+                            rows=[f"Pred {_name}" for _name in class_names]),
+            f"{mode}/single_output": wandb.Table(data=single_output),
+            f"{mode}/class_outputs": wandb.Table(data=class_outputs),
+            f"{mode}/temp_outputs": wandb.Table(data=temp_outputs),
+            f"{mode}/roc_curve": roc_fig,
+            f"{mode}/pr_curve": pr_curve
+        },
+        step=epoch+1
+    )
 
 
-        # Log Phenotypes
+        # Print and Log Phenotype Information
+        prob_phens = model_utils.torch_get_temp_phens(pis_assign=temp_pis, y_true=y, mode="prob")
+        onehot_phens = model_utils.torch_get_temp_phens(pis_assign=temp_pis, y_true=y, mode="one-hot")
 
 
 

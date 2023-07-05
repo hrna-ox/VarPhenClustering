@@ -8,11 +8,12 @@ Defines Loss Functions for the various models.
 # ============= Import Libraries =============
 from typing import List
 from matplotlib import pyplot as plt
+from matplotlib.cm import get_cmap
 import torch
 import torch.nn as nn
 
 import numpy as np
-from sklearn.metrics import RocCurveDisplay
+import sklearn.metrics as metrics
 
 eps = 1e-8
 
@@ -143,7 +144,7 @@ def macro_f1_score(y_true: np.ndarray, y_pred: np.ndarray):
     # Loop through each class
     for class_idx in range(y_true.shape[1]):
 
-        # Compute True Positives, False Postiives and False Negatives
+        # Compute True Positives, False Positives and False Negatives
         tp = np.sum((labels_pred == class_idx) & (labels_true == class_idx))
         fp = np.sum((labels_pred == class_idx) & (labels_true != class_idx))
         fn = np.sum((labels_pred != class_idx) & (labels_true == class_idx))
@@ -180,7 +181,7 @@ def micro_f1_score(y_true: np.ndarray, y_pred: np.ndarray):
     # Loop through each class
     for class_idx in range(y_true.shape[1]):
 
-        # Compute True Positives, False Postiives and False Negatives
+        # Compute True Positives, False Positives and False Negatives
         tp = np.sum((labels_pred == class_idx) & (labels_true == class_idx))
         fp = np.sum((labels_pred == class_idx) & (labels_true != class_idx))
         fn = np.sum((labels_pred != class_idx) & (labels_true == class_idx))
@@ -245,6 +246,133 @@ def precision_score(y_true: np.ndarray, y_pred: np.ndarray):
 
     return precision
 
+def get_clustering_label_metrics(y_true: np.ndarray, clus_pred: np.ndarray):
+    """
+    Compute various clustering metrics comparing the predicted clustering with the true labels. 
+
+    Params:
+    - y_true: (N, O) array of one-hot encoded outcomes.
+    - clus_pred: (N, T, K) array of cluster probability predictions over time
+
+    Returns:
+    - dict of metrics
+    """
+    
+    # If no time step, then edit to 1.
+    if len(clus_pred.shape) == 2:
+        clus_pred = clus_pred[:, None, :]
+
+    # Convert to labels
+    labels_clus = np.argmax(clus_pred, axis=-1)
+    labels_true = np.argmax(y_true, axis=-1)
+
+    # Initialize outputs
+    rand_scores, nmi_scores = [], []
+
+    for t in range(labels_clus.shape[1]):
+
+        # Compute metrics
+        rand = metrics.adjusted_rand_score(labels_true, labels_clus[:, t])                  # Closer to 1 the better
+        nmi = metrics.normalized_mutual_info_score(labels_true, labels_clus[:, t])   # Between 0 and 1, closer to 1 the better
+
+        # Add to list
+        rand_scores.append(rand)
+        nmi_scores.append(nmi)
+
+    return {"rand": rand_scores, "nmi": nmi_scores}
+
+
+def compute_unsupervised_metrics(X: np.ndarray, clus_pred: np.ndarray, seed: int = 0):
+    """
+    Compute various unsupervised metrics comparing the predicted clustering with the predicted cluster assignments.
+    For each time-step we compute the clustering metrics for the predicted clustering, but also for the data only up until the corresponding time step.
+
+    The following metrics are computed: Silhouette Score, Davies-Bouldin Index, and the Variance Ratio Criterion.
+
+    Args:
+        X (np.ndarray): Data matrix of shape (N, T, D)
+        clus_pred (np.ndarray): Cluster probability predictions of shape (N, T, K)
+        seed (int): Random State parameter for Silhouette Coefficient Computation.
+
+    Returns:
+    - dict of metrics for each time step.
+    """
+
+    # If no time step, then edit to 1.
+    if len(clus_pred.shape) == 2:
+        clus_pred = clus_pred[:, None, :]
+
+    # Get information
+    N, T, K = clus_pred.shape
+
+    # Convert to labels and right format
+    labels_clus = np.argmax(clus_pred, axis=-1)
+
+    # Initialize outputs
+    sil_scores, vri_scores, dbi_scores = [], [], []
+
+    # Iterate over time
+    for t in range(T):
+            
+        # Reshape input data into right format
+        X_t = X[:, :t+1, :].reshape(N, -1)
+
+        # Compute metrics
+        sil = metrics.silhouette_score(X_t, labels_clus[:, t], metric="euclidean", random_state=seed)      # Between -1 and 1, closer to 1 the better
+        dbi = metrics.davies_bouldin_score(X_t, labels_clus[:, t])              # The higher the better
+        vri = metrics.calinski_harabasz_score(X_t, labels_clus[:, t])   # >= 0, the lower the better
+
+        # Add to list
+        sil_scores.append(sil)
+        dbi_scores.append(dbi)
+        vri_scores.append(vri)
+
+    return {"sil": sil_scores, "dbi": dbi_scores, "vri": vri_scores}
+
+
+def get_roc_auc_score(y_true: np.ndarray, y_pred: np.ndarray):
+    """
+    Compute ROC AUC score between outcomes y_true, and predicted outcomes y_pred.
+
+    Args:
+        y_true (np.ndarray): (N, O) array of one-hot encoded outcomes.
+        y_pred (np.ndarray): (N, O) array of outcome probability predictions.
+
+    Returns:
+        roc_auc (float): scalar ROC AUC score.
+    """
+    
+    # Convert to labels
+    labels_pred = np.argmax(y_pred, axis=-1)
+    labels_true = np.argmax(y_true, axis=-1)
+
+    # Compute Roc per class
+    roc_scores = metrics.roc_auc_score(labels_true, labels_pred, average=None,
+                            multi_class="ovr")
+
+    return roc_scores
+
+def get_pr_auc_score(y_true: np.ndarray, y_pred: np.ndarray):
+    """
+    Compute PR AUC score between outcomes y_true, and predicted outcomes y_pred.
+
+    Args:
+        y_true (np.ndarray): (N, O) array of one-hot encoded outcomes.
+        y_pred (np.ndarray): (N, O) array of outcome probability predictions.
+
+    Returns:
+        pr_auc (float): scalar PR AUC score.
+    """
+    
+    # Convert to labels
+    labels_pred = np.argmax(y_pred, axis=-1)
+    labels_true = np.argmax(y_true, axis=-1)
+
+    # Compute Roc per class
+    pr_scores = metrics.average_precision_score(labels_true, labels_pred, average=None)
+
+    return pr_scores
+
 def get_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray):
     """
     Compute confusion matrix between outcomes y_true, and predicted outcomes y_pred.
@@ -281,17 +409,19 @@ def get_roc_curve(y_true: np.ndarray, y_pred: np.ndarray, class_names: List[str]
     Compute ROC curve between outcomes y_true, and predicted outcomes y_pred.
 
     Returns:
-    - fig, ax pair of plt objects with the roc curves. Includes roc curve per each class, and also macro and micro averages.
+    - fig, ax pair of plt objects with the roc curves. Includes roc curve per each class.
     """
 
     # If class_names are empty then generate some placeholder names
     num_classes = y_true.shape[1]
     if class_names == []:
         class_names = [f"Class {i}" for i in range(num_classes)]
+    roc_scores = get_roc_auc_score(y_true, y_pred)
 
     # Initialize figure
     fig, ax = plt.subplots(figsize=(10, 10))
-    
+    colors = get_cmap("tab10").colors # type: ignore
+
     # Iterate through each class
     for class_idx in range(num_classes):
 
@@ -299,6 +429,68 @@ def get_roc_curve(y_true: np.ndarray, y_pred: np.ndarray, class_names: List[str]
         y_true_class = y_true[:, class_idx]
         y_pred_class = y_pred[:, class_idx]
 
-        # Compute 
+        # roc, auc values for this class
+        auc = roc_scores[class_idx]# type: ignore
+
+        # Compute ROC Curve
+        metrics.RocCurveDisplay.from_predictions(
+            y_true=y_true_class, y_pred=y_pred_class, 
+            color=colors[class_idx], plot_chance_level=(class_idx==0),
+            ax=ax, name=f"Class {class_idx} (AUC {auc:.2f}))", 
+        )
+        
+    ax.set_title("ROC Curves")
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+
+    fig.legend()
+
+    return fig, ax
+
+
+def get_pr_curve(y_true: np.ndarray, y_pred: np.ndarray, class_names: List[str] = []):
+    """
+    Compute PR curve between outcomes y_true, and predicted outcomes y_pred.
+
+    Returns:
+    - fig, ax pair of plt objects with the roc curves. Includes roc curve per each class.
+    """
+
+    # If class_names are empty then generate some placeholder names
+    num_classes = y_true.shape[1]
+    if class_names == []:
+        class_names = [f"Class {i}" for i in range(num_classes)]
+    pr_scores = get_pr_auc_score(y_true, y_pred)
+
+    # Initialize figure
+    fig, ax = plt.subplots(figsize=(10, 10))
+    colors = get_cmap("tab10").colors # type: ignore
+
+    # Iterate through each class
+    for class_idx in range(num_classes):
+
+        # Class true and predicted values
+        y_true_class = y_true[:, class_idx]
+        y_pred_class = y_pred[:, class_idx]
+
+        # roc, auc values for this class
+        prc = pr_scores[class_idx] # type: ignore
+
+        # Compute ROC Curve
+        metrics.PrecisionRecallDisplay.from_predictions(
+            y_true=y_true_class, y_pred=y_pred_class, 
+            color=colors[class_idx], plot_chance_level=True,
+            ax=ax, name=f"Class {class_idx} (PR {prc:.2f}))", 
+        )
+        
+    ax.set_title("PR Curves")
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+
+    fig.legend()
+
+    return fig, ax
+
+
 
 # endregion
