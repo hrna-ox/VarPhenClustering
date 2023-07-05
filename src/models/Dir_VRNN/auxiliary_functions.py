@@ -357,7 +357,7 @@ def torch_plot_clus_prob_assign_time(temp_pis_assign: torch.Tensor):
 
 def torch_plot_phenotypes(phens: torch.Tensor, class_names=[]):
     """
-    Make Bar Plots for Cluster Phenotyping Information to show how they evolve over time.
+    Make Bar Plots for Cluster phenotype Information to show how they evolve over time.
 
     Args:
         - phens: numpy array of shape (K, T, O), with cluster phenotypes over time, last dimension sums to 1.
@@ -368,6 +368,7 @@ def torch_plot_phenotypes(phens: torch.Tensor, class_names=[]):
     """
 
     # Get params and base information
+    """
     K, T, O = phens.shape
     if len(class_names) == 0:
         class_names = [f"Class {i}" for i in range(O)]
@@ -390,4 +391,5 @@ def torch_plot_phenotypes(phens: torch.Tensor, class_names=[]):
         axs[clus_idx].set_title(f"Cluster {clus_idx}")
         
     return fig, axs
+    """
 # endregion

@@ -100,7 +100,7 @@ def main():
 
             
         # Save Model 
-        save_fd = "exps/Dir_VRNN/{}/{}".format(data_config["data_name"], run_config["run_name"])
+        save_fd = "exps/Dir_VRNN/{}/{}".format(run_config["data_name"], run_config["run_name"])
         if not os.path.exists(save_fd):
             os.makedirs(save_fd)
             
@@ -112,16 +112,16 @@ def main():
         print("\n\nRunning model on test data...\n\n")
 
         # Prepare Test Data
-        X_test = torch.Tensor(data_info["X"][-1], device=device)
-        y_test = torch.Tensor(data_info["y"][-1], device=device)
+        X_test = torch.Tensor(x_test, device=device)
+        y_test = torch.Tensor(y_test, device=device)
 
         # Run model on test data
         model.eval()
-        output_dic = model.predict(X_test, y_test, run_config=run_config)
+        log = model.predict(X_test, y_test, run_config=run_config)
 
         # Finish recording session and save outputs
         wandb.finish()
-        torch.save(output_dic, save_fd + "/output_dic.h5")
+        torch.save(log, save_fd + "/output_dic.h5")
 
 # endregion
 

@@ -477,46 +477,8 @@ class DirVRNN(nn.Module):
         # Similar to forward method, but focus on inner computations and tracking objects for the model.
         _, history_objects = self.forward(X, y)      # Run forward pass
 
-        # Extract computed objects
-        est_pis = history_objects["pis"]
-        mugs, log_vargs = history_objects["mugs"], history_objects["log_vargs"]
-
-        # Save output
-        wandb.log({"test/{}".format(key): value for key, value in history_objects.items()}) 
-
-        # Compute phenotypes
-        prob_phens = model_utils.torch_get_temp_phens(est_pis, y_true=y, mode="prob")
-        clus_phens = model_utils.torch_get_temp_phens(est_pis, y_true=y, mode="one-hot")
-        history_objects["prob_phens"], history_objects["clus_phens"] = prob_phens, clus_phens
-
-        # Save Phenotypes
-        for clus_id in range(self.K):
-            wandb.log({
-                "test/{}-phens-prob".format(clus_id): prob_phens[clus_id, :, :],
-                "test/{}-phens-onehot".format(clus_id): clus_phens[clus_id, :, :],
-            })
-
-
-        # Sample to obtain generated samples
-        gen_samples = model_utils.gen_diagonal_mvn(mugs, log_vargs)
-        history_objects["x_samples"] = gen_samples
-
-        # Sample 10 random patients and plot to Wandb
-        random_pats_10 = torch.randint(low=0, high=X.shape[0], size=(10,))
-
-        for _pat_id in random_pats_10:
-
-            # Select true data and generated data
-            _x_pat = X[_pat_id, :, :]
-            _x_gen = gen_samples[_pat_id, :, :]
-
-            # Plot to Wandb
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.plot(_x_pat.detach().numpy(), label="True")
-            ax.plot(_x_gen.detach().numpy(), label="Generated")
-            wandb.log({
-                "test/{}-pat".format(_pat_id): wandb.Image(fig)
-            })
+        # Log results
+        self.logger(X=X, y=y, log=history_objects, epoch=0, mode="test")
 
         # Append Test data
         history_objects["X_test"] = X
@@ -687,8 +649,46 @@ class DirVRNN(nn.Module):
         prob_phens = model_utils.torch_get_temp_phens(pis_assign=temp_pis, y_true=y, mode="prob")
         onehot_phens = model_utils.torch_get_temp_phens(pis_assign=temp_pis, y_true=y, mode="one-hot")
 
+        # Log Phenotype Information
+        wandb.log({
+            f"{mode}/prob_phens": wandb.Table(data=prob_phens.detach().numpy()),
+            f"{mode}/onehot_phens": wandb.Table(data=onehot_phens.detach().numpy())
+            },
+            step=epoch+1
+        )
 
 
+
+
+        """
+
+        MISSING IMPLEMENTATION:
+        - Get Class Names
+        - Get Feature Names
+        - Better Sampling Visualization
+
+        """
+
+
+        # Generate Data Samples and Compare with True Occurence
+        gen_samples = model_utils.gen_diagonal_mvn(mug_samps, logvar_samps).detach().numpy()
+
+        # Sample 10 random patients and plot to Wandb
+        random_pats_10 = torch.randint(low=0, high=X.shape[0], size=(10,))
+
+        for _pat_id in random_pats_10:
+
+            # Select true data and generated data
+            _x_pat = X_npy[_pat_id, :, :]
+            _x_gen = gen_samples[_pat_id, :, :]
+
+            # Plot to Wandb
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(_x_pat, label="True")
+            ax.plot(_x_gen, label="Generated")
+            wandb.log({
+                "test/{}-pat".format(_pat_id): wandb.Image(fig)
+            })
 
 
     # Useful methods for model
