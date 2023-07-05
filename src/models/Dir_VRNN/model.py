@@ -309,8 +309,7 @@ class DirVRNN(nn.Module):
         ELBO = torch.mean(ELBO, dim=0)
 
         # Append to history tracker
-        history["loss_out"] += torch.mean(pred_loss)
-        history["ELBO"] = (-1) * ELBO
+        history["loss_out"] += torch.mean(pred_loss, dim=0)
 
         return (-1) * ELBO, history      # want to maximize loss, so return negative loss
     
@@ -380,16 +379,16 @@ class DirVRNN(nn.Module):
 
                 # Add to loss tracker
                 train_loss += loss.item()
-                train_loglik += torch.sum(batch_loglik)
-                train_kl += torch.sum(batch_kl)
-                train_out += torch.sum(batch_out)
+                train_loglik += torch.sum(batch_loglik)         # Sums over batch and over time
+                train_kl += torch.sum(batch_kl)                 # Sum over batch and over time
+                train_out += torch.sum(batch_out)           # Sum over batch
 
                 # Print message of loss per batch, which is re-setted at the end of each epoch
                 print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
                     epoch, loss.item(), 100. * batch_id / len(train_loader)),
                     end="\r")
                 
-            # Print message at the end of epoch 
+            # Take average over all samples in the train data
             epoch_loglik = train_loglik / len(train_loader) 
             epoch_kl = train_kl / len(train_loader)
             epoch_out = train_out / len(train_loader)
@@ -437,67 +436,39 @@ class DirVRNN(nn.Module):
         with torch.inference_mode():
             for X, y in val_loader:
                 
-                # Compute Loss
+                # Run model once through the 
                 val_loss, history_objects = self.forward(X, y)
 
-                # Append to tracker
-                log_lik = torch.sum(history_objects["loss_loglik"])
-                kl_div = torch.sum(history_objects["loss_kl"])
-                out_l = torch.sum(history_objects["loss_out"])
-                elbo = history_objects["ELBO"]
+                # Load individual Losses from tracker
+                log_lik = torch.sum(history_objects["loss_loglik"], dim=1)
+                kl_div = torch.sum(history_objects["loss_kl"], dim=1)
+                out_l = history_objects["loss_out"]
+
+                # Log Losses
+                wandb.log({
+                    "val/epoch": epoch + 1,
+                    "val/loss": val_loss,
+                    "val/loglik": log_lik,
+                    "val/kldiv": kl_div,
+                    "val/out_l": out_l,
+                    },
+                    step=epoch+1
+                )
+
 
                 # Print message
                 print("Predict {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
                     iter_str, 100, 
-                    val_loss, log_lik, kl_div, out_l)
+                    val_loss, 
+                    torch.mean(log_lik), 
+                    torch.mean(kl_div), 
+                    torch.mean(out_l)
+                    )
                 )
 
-                # Compute useful metrics and plots during training - including:
-                # a) cluster assignment distribution, 
-                # b) cluster means separability, 
-                # c) accuracy, f1 and recall scores,
-                # d) confusion matrix, 
+                # Log results
+                self.logger(y=y, log=history_objects, epoch=epoch, mode="val")
 
-                # Compute distribution over cluster memberships at this time step.
-                "TO DO"
-
-                # Compute cluster means separability
-                avg_clus_dist = model_utils.torch_clus_means_separability(clus_means=self.c_means)
-                #tsne_projs = model_utils.torch_clus_mean_2D_tsneproj(clus_means=self.c_means, seed=self.seed)
-                #tsne_to_fmt = wandb.Table(data=tsne_projs, columns=["tsne dim 1", "tsne dim 2"])
-
-                # Compute accuracy, f1 and recall scores
-                y_pred = history_objects["y_preds"]
-                acc = LM_utils.accuracy_score(y, y_pred)
-                macro_f1 = LM_utils.f1_multiclass(y, y_pred, mode="macro")
-                micro_f1 = LM_utils.f1_multiclass(y, y_pred, mode="micro")
-
-                # Compute confusion matrix, ROC and PR curves
-                pr_curve = wandb.plot.pr_curve(torch.argmax(y,dim=-1), y_pred, labels=["A", "B", "C", "D"]) # type:ignore
-                roc_curve = wandb.plot.roc_curve(torch.argmax(y, dim=-1), y_pred, labels=["A", "B", "C", "D"]) # type:ignore
-            
-                # Log objects to Weights and Biases
-                wandb.log({
-                        "val/epoch": epoch + 1,
-                        "val/loss": val_loss,
-                        "val/loglik": log_lik,
-                        "val/kldiv": kl_div,
-                        "val/out_l": out_l,
-                        "val/ELBO": elbo, 
-                        "val/avg_clus_dist": avg_clus_dist,
-                        #f"{epoch}/tsne_projs": wandb.plot(tsne_to_fmt, "dim 1", "dim 2", title="Cluster Means TSNE Projection"),
-                        "val/acc": acc,
-                        "val/macro_f1": macro_f1,
-                        "val/micro_f1": micro_f1,
-                        "val/Precision_Recall": pr_curve,
-                        "val/Receiver_Operating_Char": roc_curve
-                    },
-                    step=epoch+1
-                )	        
-
-                # Log embeddings and other vectors
-
-    
                 return val_loss, history_objects
 
     def predict(self, X ,y, run_config: Union[Dict, None] = None):
@@ -551,6 +522,141 @@ class DirVRNN(nn.Module):
         history_objects["run_config"] = run_config
 
         return history_objects
+    
+    def logger(self, y: torch.Tensor, log:Dict, epoch: int = 0, mode: str = "val", *args, **kwargs):
+        """
+        Logger for the model. 
+
+        Params:
+        - X: unseen input data of shape (bs, T, input_size)
+        - y: true outcome data of shape (bs, output_size)
+        - Log_Dict: dictionary with loss and object information.
+        - epoch: current epoch for training. This parameter is disregarded if mode is set to 'test'.
+        - mode: str indicating whether the logger is for testing or validation.
+
+        Returns:
+        - None, saves into wandb logger
+        """
+
+        # Load objects
+        temp_pis = log["pis"]
+        
+        # ================ LOGGING ================
+
+        # Compute useful metrics and plots during training - including:
+        # a) cluster assignment distribution, 
+        # b) cluster means separability, 
+        # c) accuracy, f1 and recall scores,
+        # d) confusion matrix, 
+
+        # Compute distribution over cluster memberships at this time step.
+        clus_memb_dist = model_utils.torch_get_temp_clus_memb_dist(temp_pis_assign=temp_pis)
+        fig, ax = model_utils.plot_clus_memb_evol(temp_clus_memb=clus_memb_dist)
+        
+        # Log
+        wandb.log({f"{mode}/clus-memb-evolution": fig}, step=epoch+1)
+        plt.close()
+
+        
+        # Get Box Plots of cluster assignments and Log
+        fig, ax = model_utils.torch_plot_clus_prob_assign_time(temp_pis_assign=temp_pis)
+        wandb.log({f"{mode}/clus_assign_time_boxplot": fig}, step=epoch+1)
+        plt.close()
+
+
+        # Information about cluster separability (means and phenotypes)
+        clus_means, clus_vars = self.c_means, torch.exp(self.log_c_vars)
+        clus_mean_sep = model_utils.torch_clus_means_separability(clus_means=self.c_means)
+
+        # Log
+        wandb.log({
+                f"{mode}/cluster_means": 
+                    wandb.Table(
+                        data=clus_means.detach().numpy(),
+                    ),
+                f"{mode}/cluster_vars": 
+                    wandb.Table(
+                        data=clus_vars.detach().numpy(),
+                    ),
+                f"{mode}/clus_mean_sep": clus_mean_sep.detach().numpy(),
+            },
+            step=epoch+1
+        )
+        
+        # Log embeddings and other vectors            
+        alpha_samples, pi_samples = log["alpha_encs"], log["pis"]
+        mug_samps, logvar_samps = log["mugs"], log["log_vargs"]
+        z_samples = log["zs"]
+
+        wandb.log({
+                f"{mode}/z_samples": 
+                    wandb.Table(
+                        data=z_samples.detach().numpy()
+                    ),
+                f"{mode}/alpha_samples": 
+                    wandb.Table(
+                        data=alpha_samples.detach().numpy()
+                    ),
+                f"{mode}/pi_samples":
+                    wandb.Table(
+                        data=pi_samples.detach().numpy()
+                    ),
+                f"{mode}/mug_samples":
+                    wandb.Table(
+                        data=mug_samps.detach().numpy()
+                    ),
+                f"{mode}/logvar_samples":
+                    wandb.Table(
+                        data=logvar_samps.detach().numpy()
+                    )
+            },
+            step=epoch+1
+        )
+
+
+        # Log Performance Scores
+        y = y.detach().numpy()
+        y_pred = log["y_preds"].detach().numpy()
+
+        # Compute accuracy, f1 and recall scores
+        acc = LM_utils.accuracy_score(y_true=y, y_pred=y_pred)
+        
+        macro_f1 = LM_utils.macro_f1_score(y_true=y, y_pred=y_pred)
+        micro_f1 = LM_utils.micro_f1_score(y_true=y, y_pred=y_pred)
+        recall = LM_utils.recall_score(y_true=y, y_pred=y_pred)
+        precision = LM_utils.precision_score(y_true=y, y_pred=y_pred)
+
+        # Compute Confusion Matrix
+        confusion_matrix = LM_utils.get_confusion_matrix(y_true=y, y_pred=y_pred)
+        
+        # Compute confusion matrix, ROC and PR curves
+        pr_curve = wandb.plot.pr_curve(torch.argmax(y,dim=-1), y_pred, labels=["A", "B", "C", "D"]) # type:ignore
+        roc_curve = wandb.plot.roc_curve(torch.argmax(y, dim=-1), y_pred, labels=["A", "B", "C", "D"]) # type:ignore
+    
+        # Compute Data Clustering Metrics
+        
+
+
+
+        # Log objects to Weights and Biases
+        wandb.log({
+                f"{mode}/avg_clus_dist": avg_clus_dist,
+                #f"{epoch}/tsne_projs": wandb.plot(tsne_to_fmt, "dim 1", "dim 2", title="Cluster Means TSNE Projection"),
+                f"{mode}/acc": acc,
+                f"{mode}/macro_f1": macro_f1,
+                f"{mode}/micro_f1": micro_f1,
+                f"{mode}/Precision_Recall": pr_curve,
+                f"{mode}/Receiver_Operating_Char": roc_curve
+            },
+            step=epoch+1
+        )	        
+
+
+        # Log Phenotypes
+
+
+
+
 
     # Useful methods for model
     def x_feat_extr(self, x):

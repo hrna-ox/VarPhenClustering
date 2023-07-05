@@ -6,8 +6,13 @@ Defines Loss Functions for the various models.
 """
 
 # ============= Import Libraries =============
+from typing import List
+from matplotlib import pyplot as plt
 import torch
 import torch.nn as nn
+
+import numpy as np
+from sklearn.metrics import RocCurveDisplay
 
 eps = 1e-8
 
@@ -91,7 +96,7 @@ def cat_cross_entropy(y_true, y_pred):
 
 # region ============== Metrics ==============
 
-def accuracy_score(y_true, y_pred):
+def accuracy_score(y_true: np.ndarray, y_pred: np.ndarray):
     """
     Compute accuracy score between outcomes y_true, and predicted outcomes y_pred.
 
@@ -104,72 +109,93 @@ def accuracy_score(y_true, y_pred):
     """
 
     # Convert to labels
-    labels_pred = torch.argmax(y_pred, dim=-1)
-    labels_true = torch.argmax(y_true, dim=-1)
+    labels_pred = np.argmax(y_pred, axis=-1)
+    labels_true = np.argmax(y_true, axis=-1)
 
     # Compare pairwise and sum across tensor
-    correct_pred = torch.sum(labels_pred == labels_true)
-    num_preds = labels_pred.size()[0]
+    correct_pred = np.sum(labels_pred == labels_true)
+    num_preds = np.size(labels_pred)
 
     # Compute accuracy
     acc = correct_pred / num_preds
 
     return acc
 
-def f1_multiclass(y_true, y_pred, mode='macro'):
+def macro_f1_score(y_true: np.ndarray, y_pred: np.ndarray):
     """
-    Compute Multi-class F1 score between outcomes y_true, and predicted outcomes y_pred.
+    Compute Macro Multi-Class F1 score between true outcomes y_true, and predicted values y_pred.
 
-    Args:
-        y_true (_type_): (N, O) array of one-hot encoded outcomes.
-        y_pred (_type_): (N, O) array of outcome probability predictions.
-        mode (_type_): 'macro' or 'micro' F1 score.
+    Params:
+    - y_true: (N, O) array of one-hot encoded outcomes.
+    - y_pred: (N, O) array of outcome probability predictions.
 
     Returns:
-        Tuple of macro, micro F1 multi-class scores.
+    - f1_score: scalar F1 score.
     """
 
-    try:
-        assert mode in ['macro', 'micro']
-    except AssertionError:
-        raise ValueError("mode must be either 'macro' or 'micro'")
-    
-    # Get params and initialise output tensor
-    _, O = y_true.size()
-    f1_scores = torch.zeros(O, device=y_pred.device)
-    total_fp, total_fn, total_tp = 0, 0, 0
-
     # Convert to labels
-    labels_pred = torch.argmax(y_pred, dim=-1)
-    labels_true = torch.argmax(y_true, dim=-1)
+    labels_pred = np.argmax(y_pred, axis=-1)
+    labels_true = np.argmax(y_true, axis=-1)
 
-    # Iterate over classes
-    for class_idx in range(O):
+    # Initialize tracker of f1 score
+    f1_scores = []
 
-        # Compute True Positives, False Positives, False Negatives
-        TP = torch.sum((labels_pred == class_idx) & (labels_true == class_idx))
-        FP = torch.sum((labels_pred == class_idx) & (labels_true != class_idx))
-        FN = torch.sum((labels_pred != class_idx) & (labels_true == class_idx))
+    # Loop through each class
+    for class_idx in range(y_true.shape[1]):
+
+        # Compute True Positives, False Postiives and False Negatives
+        tp = np.sum((labels_pred == class_idx) & (labels_true == class_idx))
+        fp = np.sum((labels_pred == class_idx) & (labels_true != class_idx))
+        fn = np.sum((labels_pred != class_idx) & (labels_true == class_idx))
 
         # Compute precision and recall
-        precision = TP / (TP + FP + eps)
-        recall = TP / (TP + FN + eps)
+        precision = np.divide(tp, tp + fp)
+        recall = np.divide(tp, tp + fn)
 
-        # Compute F1 score
-        f1_scores[class_idx] = 2 * precision * recall / (precision + recall)
+        # Compute F1 score and append
+        f1 = 2 * np.divide(precision * recall, precision + recall)
+        f1_scores.append(f1)
 
-        # Add to global trackers
-        total_fp += FP
-        total_fn += FN
-        total_tp += TP
+    return np.mean(f1_scores)
 
-    # Compute macro and micro F1 scores
-    macro_f1 = torch.mean(f1_scores)
-    micro_f1 = total_tp / (total_tp + 0.5 * (total_fp + total_fn))
+def micro_f1_score(y_true: np.ndarray, y_pred: np.ndarray):
+    """
+    Compute Micro Multi-Class F1 score between true outcomes y_true, and predicted values y_pred.
 
-    return macro_f1, micro_f1
+    Params:
+    - y_true: (N, O) array of one-hot encoded outcomes.
+    - y_pred: (N, O) array of outcome probability predictions.
 
-def recall_score(y_true, y_pred):
+    Returns:
+    - f1_score: scalar F1 score.
+    """
+
+    # Convert to labels
+    labels_pred = np.argmax(y_pred, axis=-1)
+    labels_true = np.argmax(y_true, axis=-1)
+
+    # Initialize trackers
+    total_tp, total_fp, total_fn = 0, 0, 0
+
+    # Loop through each class
+    for class_idx in range(y_true.shape[1]):
+
+        # Compute True Positives, False Postiives and False Negatives
+        tp = np.sum((labels_pred == class_idx) & (labels_true == class_idx))
+        fp = np.sum((labels_pred == class_idx) & (labels_true != class_idx))
+        fn = np.sum((labels_pred != class_idx) & (labels_true == class_idx))
+
+        # Add to global values
+        total_tp += tp
+        total_fp += fp
+        total_fn += fn
+
+    # Compute f1 score
+    f1 = 2 * np.divide(total_tp, 2 * total_tp + total_fp + total_fn)
+
+    return f1
+
+def recall_score(y_true: np.ndarray, y_pred: np.ndarray):
     """
     Compute recall score between outcomes y_true, and predicted outcomes y_pred.
 
@@ -182,8 +208,8 @@ def recall_score(y_true, y_pred):
     """
     
     # Convert to labels
-    labels_pred = torch.argmax(y_pred, dim=-1)
-    labels_true = torch.argmax(y_true, dim=-1)
+    labels_pred = np.argmax(y_pred, axis=-1)
+    labels_true = np.argmax(y_true, axis=-1)
 
     # Compute TP, FP, FN
     TP = torch.sum((labels_pred == labels_true) & (labels_true == 1))
@@ -193,5 +219,86 @@ def recall_score(y_true, y_pred):
     recall = TP / (TP + FN)
 
     return recall
+
+def precision_score(y_true: np.ndarray, y_pred: np.ndarray):
+    """
+    Compute precision score between outcomes y_true, and predicted outcomes y_pred.
+
+    Args:
+        y_true (np.ndarray): (N, O) array of one-hot encoded outcomes.
+        y_pred (np.ndarray): (N, O) array of outcome probability predictions.
+
+    Returns:
+        precision (float): scalar precision score.
+    """
+    
+    # Convert to labels
+    labels_pred = np.argmax(y_pred, axis=-1)
+    labels_true = np.argmax(y_true, axis=-1)
+
+    # Compute TP, FP, FN
+    TP = torch.sum((labels_pred == labels_true) & (labels_true == 1))
+    FP = torch.sum((labels_pred != labels_true) & (labels_true == 0))
+
+    # Compute precision
+    precision = TP / (TP + FP)
+
+    return precision
+
+def get_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray):
+    """
+    Compute confusion matrix between outcomes y_true, and predicted outcomes y_pred.
+
+    Args:
+        y_true (np.ndarray): (N, O) array of one-hot encoded outcomes.
+        y_pred (np.ndarray): (N, O) array of outcome probability predictions.
+
+    Returns:
+        confusion_matrix (np.ndarray): (O, O) confusion matrix.
+    """
+    
+    # Convert to labels
+    labels_pred = np.argmax(y_pred, axis=-1)
+    labels_true = np.argmax(y_true, axis=-1)
+
+    # Initialize confusion matrix to zeros
+    confusion_matrix = np.zeros((y_pred.shape[1], y_true.shape[1]))
+
+    # Loop through each true class and then predicted class
+    for pred_idx in range(y_pred.shape[1]):
+        for true_idx in range(y_true.shape[1]):
+
+            # Compute the number of elements with a given predicted class and a given true class
+            confusion_matrix[true_idx, pred_idx] = np.sum(
+                                            (labels_pred == pred_idx) &
+                                            (labels_true == true_idx)
+                                        )
+
+    return confusion_matrix
+
+def get_roc_curve(y_true: np.ndarray, y_pred: np.ndarray, class_names: List[str] = []):
+    """
+    Compute ROC curve between outcomes y_true, and predicted outcomes y_pred.
+
+    Returns:
+    - fig, ax pair of plt objects with the roc curves. Includes roc curve per each class, and also macro and micro averages.
+    """
+
+    # If class_names are empty then generate some placeholder names
+    num_classes = y_true.shape[1]
+    if class_names == []:
+        class_names = [f"Class {i}" for i in range(num_classes)]
+
+    # Initialize figure
+    fig, ax = plt.subplots(figsize=(10, 10))
+    
+    # Iterate through each class
+    for class_idx in range(num_classes):
+
+        # Class true and predicted values
+        y_true_class = y_true[:, class_idx]
+        y_pred_class = y_pred[:, class_idx]
+
+        # Compute 
 
 # endregion

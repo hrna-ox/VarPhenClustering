@@ -24,6 +24,7 @@
         "outtimes",
         "relu",
         "resprate",
+        "seaborn",
         "VRNN"
     ],
     "python.analysis.typeCheckingMode": "basic",

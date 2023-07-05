@@ -13,6 +13,11 @@ from torch.nn.functional import one_hot
 
 from tsnecuda import TSNE
 
+# Visualization tools
+import matplotlib.pyplot as plt
+from matplotlib import cm
+import seaborn as sns
+
 # endregion
 
 
@@ -93,6 +98,100 @@ def gen_diagonal_mvn(mu_g: torch.Tensor, log_var_g: torch.Tensor) -> torch.Tenso
 
 
 # region ========= Functions related to cluster properties =========
+def torch_get_clus_memb_dist(pis_assign: torch.Tensor):
+    """
+    Given probabilities of cluster assignment, compute the estimated distribution of cluster assignments, using the same ordering.
+
+    Params:
+    - pis_assign: torch.Tensor object of shape (bs, K), where rows sum to 1 indicating cluster assignment probability.
+
+    Returns:
+    - clus_assign_dist: torch.Tensor of shape (K) with the number of patients assigned to each cluster using a 'most likely assignment' approach.
+    """
+
+    # Compute most likely cluster assignment
+    clus_assign = torch.argmax(pis_assign, dim=1)
+
+    # Initialize output and iterate through each cluster
+    K = pis_assign.shape[1]
+    clus_assign_dist = torch.zeros(K)
+
+    for k in range(K):
+
+        # Get number of patients assigned to cluster k
+        clus_assign_dist[k] = torch.sum(clus_assign == k)
+
+    return clus_assign_dist
+
+
+def torch_get_temp_clus_memb_dist(temp_pis_assign: torch.Tensor):
+    """
+    Given probabilities of cluster assignment, compute the estimated distribution of cluster assignments, using the same ordering. This is 
+    a temporal variant of the function 'torch_get_clus_memb_dist'.
+
+    Params:
+    - temp_pis_assign: torch.Tensor object of shape (bs, T, K), where the last dimension sums to 1 indicating cluster assignment probability.
+
+    Returns:
+    - clus_assign_dist: torch.Tensor of shape (T, K) with the number of patients assigned to each cluster using a 'most likely assignment' approach.
+    """
+
+    # Initialize output
+    _, T, K = temp_pis_assign.shape
+    clus_assign_dist = torch.zeros(T, K)
+
+    # Iterate through each time step
+    for t in range(T):
+
+        # Get cluster assignment distribution at time step t
+        clus_assign_dist[t, :] = torch_get_clus_memb_dist(temp_pis_assign[:, t, :])
+
+    return clus_assign_dist
+
+def torch_clus_means_separability(clus_means: torch.Tensor) -> torch.Tensor:
+    """Compute latent space separability between cluster means.
+
+    Args:
+        clus_means (torch.Tensor): of shape (K, dim) with cluster means.
+
+    Returns:
+        torch.Tensor: with average L2 distance between cluster means.
+    """
+
+    # Get params
+    K, dim = clus_means.shape
+
+    # Compute L2 distance between cluster means
+    pairwise_diff = clus_means.reshape(K, 1, dim) - clus_means.reshape(1, K, dim)
+    pairwise_dist = torch.square(pairwise_diff).sum(dim=2)
+
+    # Get average across cluster pairs
+    avg_dist = pairwise_dist.sum() / (K * (K - 1))
+
+    return avg_dist
+
+def torch_clus_mean_2D_tsneproj(clus_means: torch.Tensor, seed: int) -> torch.Tensor:
+    """Get 2D TSNE plot of cluster means.
+
+    Args:
+        clus_means (torch.Tensor): of shape (K, dim) with cluster means.
+        seed (int): random seed for reproducibility.
+
+    Outputs:
+        clus_reps: of shape (K, 2) with 2D TSNE plot of cluster means.
+    """ 
+
+    # Get TSNE object
+    tsne = TSNE(n_components=2, random_seed=seed, verbose=0)
+
+    # Apply tsne transform
+    clus_reps = tsne.fit_transform(clus_means)
+
+    # Return figure
+    return torch.Tensor(clus_reps)
+
+# endregion
+# region ================== Functions related to phenotype computation ==================
 def torch_phens_from_prob(pis_assign: torch.Tensor, y_true: torch.Tensor):
     """
     Computes the phenotype for each cluster given cluster assignment probabilities, and the true labels. The contribution of each patient is equivalent 
@@ -181,47 +280,75 @@ def torch_get_temp_phens(pis_assign: torch.Tensor, y_true: torch.Tensor, mode: s
 
     return phens
 
-def torch_clus_means_separability(clus_means: torch.Tensor) -> torch.Tensor:
-    """Compute latent space separability between cluster means.
+# endregion
 
-    Args:
-        clus_means (torch.Tensor): of shape (K, dim) with cluster means.
+# region ====================  FUNCTIONS FOR PLOTTING ===============================
 
-    Returns:
-        torch.Tensor: with average L2 distance between cluster means.
+def plot_clus_memb_evol(temp_clus_memb: torch.Tensor):
+    """
+    Given cluster membership assignments, visualize cluster membership evolution over time.
+
+    Params:
+    - clus_assign_dist: torch.Tensor of shape (T, K) with the number of patients assigned to each cluster using a 'most likely assignment' approach.
     """
 
-    # Get params
-    K, dim = clus_means.shape
+    # Get dimensions
+    T, K = temp_clus_memb.shape
 
-    # Compute L2 distance between cluster means
-    pairwise_diff = clus_means.reshape(K, 1, dim) - clus_means.reshape(1, K, dim)
-    pairwise_dist = torch.square(pairwise_diff).sum(dim=2)
+    # Initialize figure and axis objects
+    fig, ax = plt.subplots(figsize=(10, 5))
+    cmap = cm.get_cmap("tab10")
+    colors = cmap.colors # type: ignore
 
-    # Get average across cluster pairs
-    avg_dist = pairwise_dist.sum() / (K * (K - 1))
+    # Iterate through each cluster
+    for k in range(K):
+        
+        # Plot cluster membership evolution
+        ax.plot(range(1, T + 1), temp_clus_memb[:, k], label=f"Cluster {k}", linewidth=2, linestyle='--', color=colors[k])
 
-    return avg_dist
+    # Decorate axes
+    ax.set_xticklabels(range(1, T+1))
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Num")
 
-def torch_clus_mean_2D_tsneproj(clus_means: torch.Tensor, seed: int) -> torch.Tensor:
-    """Get 2D TSNE plot of cluster means.
+    ax.set_title("Plot of cluster membership evolution over time")
 
-    Args:
-        clus_means (torch.Tensor): of shape (K, dim) with cluster means.
-        seed (int): random seed for reproducibility.
+    return fig, ax
 
-    Outputs:
-        clus_reps: of shape (K, 2) with 2D TSNE plot of cluster means.
-    """ 
 
-    # Get TSNE object
-    tsne = TSNE(n_components=2, random_seed=seed, verbose=0)
+def torch_plot_clus_prob_assign_time(temp_pis_assign: torch.Tensor):
+    """
+    Make Box plots of cluster assignment probabilities over time.
 
-    # Apply tsne transform
-    clus_reps = tsne.fit_transform(clus_means)
+    Params:
+    - temp_pis_assign: torch.Tensor object of shape (bs, T, K), where the last dimension sums to 1 indicating cluster assignment probability.
+    
+    Returns:
+    - fig, ax: matplotlib figure and axis objects. For each plot, we plot the temporal evolution of cluster assignment probabilities.
+    """
 
-    # Return figure
-    return torch.Tensor(clus_reps)
+    # Get params and base information
+    _, T, K = temp_pis_assign.shape
+    clus_memb_num = torch_get_temp_clus_memb_dist(temp_pis_assign=temp_pis_assign)
 
+    # Initialize figure and axis objects
+    nrows, ncols = torch.ceil(K / torch.Tensor(2)).int(), 2
+    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10,5))
+    axs = ax.flatten()
+
+    # Iterate over clusters
+    for clus_idx in range(K):
+
+        # Iterate over time
+        for t in range(T):
+
+            sns.boxplot(temp_pis_assign[:, :, clus_idx], orient="v",
+                        ax=axs[clus_idx])
+
+        axs[clus_idx].set_xlabel("Time")
+        axs[clus_idx].set_ylabel("Prob")
+        axs[clus_idx].set_title(f"Cluster {clus_idx}")
+        
+    return fig, axs
 
 # endregion
