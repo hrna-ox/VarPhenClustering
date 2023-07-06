@@ -36,7 +36,7 @@ def torch_log_gaussian_lik(x, mu, var, device=None):
     _ , inp_size = x.size()
 
     # Compute exponential term
-    exp_term =  0.5 * torch.sum(((x - mu) / var) * (x - mu), dim=-1)   # (batch_size)
+    exp_term =  0.5 * torch.sum(((x - mu) / var) * (x - mu), dim=-1)   # type: ignore # (batch_size)
     lin_term = torch.sum(torch.log(var), dim=-1, keepdim=False)   # (batch_size)
     cons_term = 0.5 * inp_size * torch.log(2 * torch.acos(torch.zeros(1)) * 2).to(device=device) # constant
 

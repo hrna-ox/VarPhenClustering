@@ -12,14 +12,15 @@ import torch
 import torch.nn as nn
 import wandb
 
-from typing import Tuple, Dict, Union
+from typing import Tuple, Dict, Union, List
 from torch.utils.data import DataLoader, TensorDataset
 
 import src.models.losses_and_metrics as LM_utils
 from src.models.deep_learning_base_classes import MLP, LSTM_Dec_v1, LSTM_Dec_v2
 
-import src.models.Dir_VRNN.auxiliary_functions as model_utils
-from src.models.Dir_VRNN.auxiliary_functions import eps
+import src.models.DirVRNN.auxiliary_functions as model_utils
+from src.models.DirVRNN.auxiliary_functions import eps
+from src.models.DirVRNN.logger import logger
 
 import matplotlib.pyplot as plt
 
@@ -209,8 +210,18 @@ class DirVRNN(nn.Module):
         batch_size, seq_len, input_size = x.size()
 
         # Basic information about the sequence and number of time-steps
-        assert seq_len % self.w_size == 0 # Sequence length must be divisible by window size
-        num_time_steps = int(seq_len / self.w_size)
+        try:
+            assert seq_len % self.w_size == 0 # Sequence length must be divisible by window size
+        
+        except AssertionError:
+
+            # Get list of arrays to disregard
+            num_discard = seq_len % self.w_size
+            print(f"Sequence length must be divisible by window size. Data has {seq_len} time steps, and window size is {self.w_size}. We disregard the first {num_discard} time steps.")
+            self.forward(x[:, num_discard:, :], y[:, :])
+        
+        # Get number of time steps that we have
+        num_time_steps = int(seq_len / self.w_size) - 1
 
 
         # Initialization of pi, z, and h assignments
@@ -373,7 +384,7 @@ class DirVRNN(nn.Module):
 
                 # Compute Loss for single model pass
                 loss, history_objects = self.forward(x, y)
-                batch_loglik, batch_kl, batch_out = history_objects["loss_loglik"], history_objects["loss_kl"], history_objects["loss_out"]
+                batch_loglik, batch_kl, batch_outl = history_objects["loss_loglik"], history_objects["loss_kl"], history_objects["loss_out"]
 
                 # Back-propagate loss and update weights
                 loss.backward()
@@ -381,9 +392,9 @@ class DirVRNN(nn.Module):
 
                 # Add to loss tracker
                 train_loss += loss.item()
-                train_loglik += torch.sum(batch_loglik)         # Sums over batch and over time
-                train_kl += torch.sum(batch_kl)                 # Sum over batch and over time
-                train_out += torch.sum(batch_out)           # Sum over batch
+                train_loglik += torch.sum(batch_loglik)         # Sums over time
+                train_kl += torch.sum(batch_kl)                 # Sum over time
+                train_out += batch_outl                 # Add batch loss total loss over batch
 
                 # Print message of loss per batch, which is re-setted at the end of each epoch
                 print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
@@ -398,7 +409,7 @@ class DirVRNN(nn.Module):
             # Print Message at the end of each epoch with the main loss and all auxiliary loss functions
             print("Train epoch {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
                 epoch + 1, 100, 
-                train_loss, epoch_loglik, epoch_kl, epoch_out))
+                train_loss.item(), epoch_loglik.item(), epoch_kl.item(), epoch_out.item()))
                 
             
             # Log objects to Weights and Biases
@@ -416,7 +427,7 @@ class DirVRNN(nn.Module):
             if X_val is not None and y_val is not None:
                 self.validate(X_val, y_val, epoch=epoch)
     
-    def validate(self, X, y, epoch: int):
+    def validate(self, X, y, epoch: int, class_names: List = []):
         """
         Compute Performance on Val Dataset.
 
@@ -424,6 +435,7 @@ class DirVRNN(nn.Module):
             - X: input data of shape (bs, T, input_size)
             - y: outcome data of shape (bs, output_size)
             - epoch: int indicating epoch number
+            - class_names: List (optional): list of class names for logging
         """
 
         # Set model to evaluation mode 
@@ -442,8 +454,8 @@ class DirVRNN(nn.Module):
                 val_loss, history_objects = self.forward(X, y)
 
                 # Load individual Losses from tracker
-                log_lik = torch.sum(history_objects["loss_loglik"], dim=1)
-                kl_div = torch.sum(history_objects["loss_kl"], dim=1)
+                log_lik = history_objects["loss_loglik"]
+                kl_div = history_objects["loss_kl"]
                 out_l = history_objects["loss_out"]
 
                 # Log Losses
@@ -461,24 +473,34 @@ class DirVRNN(nn.Module):
                 # Print message
                 print("Predict {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
                     iter_str, 100, 
-                    val_loss, 
-                    torch.mean(log_lik), 
-                    torch.mean(kl_div), 
-                    torch.mean(out_l)
+                    val_loss.item(), 
+                    torch.sum(log_lik).item(), 
+                    torch.sum(kl_div).item(), 
+                    torch.sum(out_l).item()
                     )
                 )
 
                 # Log results
-                self.logger(X=X, y=y, log=history_objects, epoch=epoch, mode="val")
+                model_params={
+                    "c_means": self.c_means,
+                    "log_c_vars": self.log_c_vars,
+                    "seed": self.seed,
+                }
+                logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=epoch, mode="val", class_names=class_names)
 
                 return val_loss, history_objects
 
-    def predict(self, X ,y, run_config: Union[Dict, None] = None):
+    def predict(self, X ,y, run_config: Union[Dict, None] = None, class_names: List = []):
         # Similar to forward method, but focus on inner computations and tracking objects for the model.
         _, history_objects = self.forward(X, y)      # Run forward pass
 
         # Log results
-        self.logger(X=X, y=y, log=history_objects, epoch=0, mode="test")
+        model_params={
+            "c_means": self.c_means,
+            "log_c_vars": self.log_c_vars,
+            "seed": self.seed,
+        }
+        logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=0, mode="test", class_names=class_names)
 
         # Append Test data
         history_objects["X_test"] = X
@@ -487,210 +509,6 @@ class DirVRNN(nn.Module):
 
         return history_objects
     
-    def logger(self, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch: int = 0, mode: str = "val", *args, **kwargs):
-        """
-        Logger for the model. 
-
-        Params:
-        - X: unseen input data of shape (bs, T, input_size)
-        - y: true outcome data of shape (bs, output_size)
-        - Log_Dict: dictionary with loss and object information.
-        - epoch: current epoch for training. This parameter is disregarded if mode is set to 'test'.
-        - mode: str indicating whether the logger is for testing or validation.
-
-        Returns:
-        - None, saves into wandb logger
-        """
-
-        # Load objects
-        temp_pis = log["pis"]
-        
-        # ================ LOGGING ================
-
-        # Compute useful metrics and plots during training - including:
-        # a) cluster assignment distribution, 
-        # b) cluster means separability, 
-        # c) accuracy, f1 and recall scores,
-        # d) confusion matrix, 
-
-        # Compute distribution over cluster memberships at this time step.
-        clus_memb_dist = model_utils.torch_get_temp_clus_memb_dist(temp_pis_assign=temp_pis)
-        fig, ax = model_utils.plot_clus_memb_evol(temp_clus_memb=clus_memb_dist)
-        
-        # Log
-        wandb.log({f"{mode}/clus-memb-evolution": fig}, step=epoch+1)
-        plt.close()
-
-        
-        # Get Box Plots of cluster assignments and Log
-        fig, ax = model_utils.torch_plot_clus_prob_assign_time(temp_pis_assign=temp_pis)
-        wandb.log({f"{mode}/clus_assign_time_boxplot": fig}, step=epoch+1)
-        plt.close()
-
-
-        # Information about cluster separability (means and phenotypes)
-        clus_means, clus_vars = self.c_means, torch.exp(self.log_c_vars)
-        clus_mean_sep = model_utils.torch_clus_means_separability(clus_means=self.c_means)
-
-        # Log
-        wandb.log({
-                f"{mode}/cluster_means": 
-                    wandb.Table(
-                        data=clus_means.detach().numpy(),
-                    ),
-                f"{mode}/cluster_vars": 
-                    wandb.Table(
-                        data=clus_vars.detach().numpy(),
-                    ),
-                f"{mode}/clus_mean_sep": clus_mean_sep.detach().numpy(),
-            },
-            step=epoch+1
-        )
-        
-        # Log embeddings and other vectors            
-        alpha_samples, pi_samples = log["alpha_encs"], log["pis"]
-        mug_samps, logvar_samps = log["mugs"], log["log_vargs"]
-        z_samples = log["zs"]
-
-        wandb.log({
-                f"{mode}/z_samples": 
-                    wandb.Table(
-                        data=z_samples.detach().numpy()
-                    ),
-                f"{mode}/alpha_samples": 
-                    wandb.Table(
-                        data=alpha_samples.detach().numpy()
-                    ),
-                f"{mode}/pi_samples":
-                    wandb.Table(
-                        data=pi_samples.detach().numpy()
-                    ),
-                f"{mode}/mug_samples":
-                    wandb.Table(
-                        data=mug_samps.detach().numpy()
-                    ),
-                f"{mode}/logvar_samples":
-                    wandb.Table(
-                        data=logvar_samps.detach().numpy()
-                    )
-            },
-            step=epoch+1
-        )
-
-
-        # Log Performance Scores
-        y_npy = y.detach().numpy()
-        y_pred = log["y_preds"].detach().numpy()
-        clus_prob = temp_pis.detach().numpy()
-        X_npy = X.detach().numpy()
-        class_names = [f"Class {i}" for i in range(y_pred.shape[-1])]
-
-        # Compute accuracy, f1 and recall scores
-        acc = LM_utils.accuracy_score(y_true=y_npy, y_pred=y_pred)
-        
-        macro_f1 = LM_utils.macro_f1_score(y_true=y_npy, y_pred=y_pred)
-        micro_f1 = LM_utils.micro_f1_score(y_true=y_npy, y_pred=y_pred)
-        recall = LM_utils.recall_score(y_true=y_npy, y_pred=y_pred)
-        precision = LM_utils.precision_score(y_true=y_npy, y_pred=y_pred)
-
-        # Get roc and prc
-        roc_scores = LM_utils.get_roc_auc_score(y_true=y_npy, y_pred=y_pred)
-        prc_scores = LM_utils.get_pr_auc_score(y_true=y_npy, y_pred=y_pred)
-
-        # Compute Confusion Matrix
-        confusion_matrix = LM_utils.get_confusion_matrix(y_true=y_npy, y_pred=y_pred)
-
-        # Compute confusion matrix, ROC and PR curves
-        roc_fig, roc_ax = LM_utils.get_roc_curve(y_true=y_npy, y_pred=y_pred, class_names=[]) 
-        pr_curve = LM_utils.get_pr_curve(y_true=y_npy, y_pred=y_pred, class_names=[])
-    
-        # Compute Data Clustering Metrics
-        label_metrics = LM_utils.get_clustering_label_metrics(y_true=y_npy, clus_pred=clus_prob)
-        rand, nmi = label_metrics["rand"], label_metrics["nmi"]
-
-        # Compute Unsupervised Clustering Metrics
-        unsup_metrics = LM_utils.compute_unsupervised_metrics(X=X_npy, clus_pred=clus_prob, seed=self.seed)
-        sil, dbi, vri = unsup_metrics["sil"], unsup_metrics["dbi"], unsup_metrics["vri"]
-
-        # Combine scores to single table
-        single_output = pd.Series(
-            data = [acc, macro_f1, micro_f1, recall, precision],
-            index=["Accuracy", "Macro F1", "Micro F1", "Recall", "Precision"]
-        )
-
-        class_outputs = pd.DataFrame(
-            data=np.vstack((roc_scores, prc_scores)),
-            index=["ROC", "PRC"],
-            columns=class_names
-        )
-        
-        temp_outputs = pd.DataFrame(
-            data=np.vstack((rand, nmi, sil, dbi, vri)),
-            index=["Rand", "NMI", "Silhouette", "DBI", "VRI"],
-            columns=list(range(X_npy.shape[1]))
-        )
-
-        # Log Objects
-        wandb.log({
-            f"{mode}/confusion_matrix":
-                wandb.Table(data=confusion_matrix, columns=[f"True {_name}" for _name in class_names], 
-                            rows=[f"Pred {_name}" for _name in class_names]),
-            f"{mode}/single_output": wandb.Table(data=single_output),
-            f"{mode}/class_outputs": wandb.Table(data=class_outputs),
-            f"{mode}/temp_outputs": wandb.Table(data=temp_outputs),
-            f"{mode}/roc_curve": roc_fig,
-            f"{mode}/pr_curve": pr_curve
-        },
-        step=epoch+1
-    )
-
-
-        # Print and Log Phenotype Information
-        prob_phens = model_utils.torch_get_temp_phens(pis_assign=temp_pis, y_true=y, mode="prob")
-        onehot_phens = model_utils.torch_get_temp_phens(pis_assign=temp_pis, y_true=y, mode="one-hot")
-
-        # Log Phenotype Information
-        wandb.log({
-            f"{mode}/prob_phens": wandb.Table(data=prob_phens.detach().numpy()),
-            f"{mode}/onehot_phens": wandb.Table(data=onehot_phens.detach().numpy())
-            },
-            step=epoch+1
-        )
-
-
-
-
-        """
-
-        MISSING IMPLEMENTATION:
-        - Get Class Names
-        - Get Feature Names
-        - Better Sampling Visualization
-
-        """
-
-
-        # Generate Data Samples and Compare with True Occurence
-        gen_samples = model_utils.gen_diagonal_mvn(mug_samps, logvar_samps).detach().numpy()
-
-        # Sample 10 random patients and plot to Wandb
-        random_pats_10 = torch.randint(low=0, high=X.shape[0], size=(10,))
-
-        for _pat_id in random_pats_10:
-
-            # Select true data and generated data
-            _x_pat = X_npy[_pat_id, :, :]
-            _x_gen = gen_samples[_pat_id, :, :]
-
-            # Plot to Wandb
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.plot(_x_pat, label="True")
-            ax.plot(_x_gen, label="Generated")
-            wandb.log({
-                "test/{}-pat".format(_pat_id): wandb.Image(fig)
-            })
-
-
     # Useful methods for model
     def x_feat_extr(self, x):
         return self.phi_x_out(self.phi_x(x))

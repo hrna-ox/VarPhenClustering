@@ -86,7 +86,7 @@ def _get_features(feat_set: Union[str, List[str]], data_name: str) -> List[str]:
         feat_subset.extend(features["OUTCOMES"])
 
     # Ensure uniqueness
-    feat_subset = list(set(feat_subset))
+    feat_subset = sorted(list(set(feat_subset)))
     print(
         f"\n{data_name} data has been sub-setted to the following features: \n {feat_subset}."
     )
@@ -111,7 +111,7 @@ def _numpy_forward_fill(array):
 
     # Index matching for output. For n, d sample as previously, use inter_array for previous time id
     array_out = array_out[
-        np.arange(array_out.shape[0])[:, None, None],
+        np.arange(array_out.shape[0])[:, None, None], # type: ignore
         inter_array,
         np.arange(array_out.shape[-1])[None, None, :],
     ]
@@ -202,6 +202,7 @@ class CSVLoader:
     def __init__(
         self,
         data_name: str,
+        *args,
         **kwargs,
     ):
         """
@@ -209,13 +210,17 @@ class CSVLoader:
 
         Params:
             - data_name: ('HAVEN', 'MIMIC', ...)
-            - **kwargs: additional arguments to be passed to the class (added only for compatibility)
+            - *args, **kwargs: additional arguments to be passed to the class (added only for compatibility)
         """
 
         # Save parameters
         self.data_name = data_name.upper()
         self.id_col = "stay_id"
         self.time_col = "sampled_time_to_end"
+
+        print("\n \n Data Name is :", self.data_name, "\n\n")
+
+        super().__init__(*args, **kwargs)
 
     def load_from_csv(self):
         """
@@ -257,11 +262,14 @@ class CSVLoader:
             )
 
         # Convert target column to TimeDelta
-        X["sampled_time_to_end"] = pd.to_timedelta(X.loc[:, "sampled_time_to_end"])
+        X["sampled_time_to_end"] = pd.to_timedelta(X.loc[:, "sampled_time_to_end"]) # type: ignore
 
         # Convert to hours
         X["hours_to_end"] = X["sampled_time_to_end"].dt.total_seconds() / 3600
         self.time_col = "hours_to_end"
+
+        # Sort values
+        X.sort_values(by=[self.id_col, self.time_col], ascending=[True, False], inplace=True)
 
         return X, y
 
@@ -272,6 +280,7 @@ class DataTransformer(CSVLoader):
 
     def __init__(
         self, 
+        data_name: str, 
         ts_endpoints: Tuple[float, float], 
         feat_set: Union[str, List], 
         *args, **kwargs
@@ -280,16 +289,17 @@ class DataTransformer(CSVLoader):
         Initialise object parameters and attributes.
 
         Params:
+            - data_name: str indicating the data to load.
             - ts_endpoints: Tuple of floats, indicating the endpoints of the time series to consider.
             - feat_set: str or list, the set of features to consider.
             - *args, **kwargs: Additional arguments to pass to parent class.
         """
         self.ts_min, self.ts_max = ts_endpoints
-        self.features = _get_features(feat_set, self.data_name)
-        self.outcomes = _get_features("outcomes", self.data_name)
+        self.features = _get_features(feat_set, data_name)
+        self.outcomes = _get_features("outcomes", data_name)
 
         # Call parent class
-        super(CSVLoader, self).__init__(*args, **kwargs)
+        super().__init__(data_name=data_name, *args, **kwargs)
 
     def transform(self, data: Tuple[pd.DataFrame, pd.DataFrame]):
         """
@@ -384,7 +394,7 @@ class DataTransformer(CSVLoader):
         # Each patient has observation in decreasing order based on sampled time to end.
         cond2 = (
             X.groupby(self.id_col)
-            .apply(lambda x: x.time_col.is_monotonic_decreasing)
+            .apply(lambda x: x[self.time_col].is_monotonic_decreasing)
             .all()
         )
         assert cond2
@@ -447,11 +457,11 @@ class DataTransformer(CSVLoader):
 
             # Compute negative differences instead of keeping the original times.
             x_id_copy = x_id.copy()
-            x_id_copy["time_to_end"] = -x_id["time_to_end"].diff().values
+            x_id_copy["hours_to_end"] = -x_id["hours_to_end"].diff().values
 
             # Update target output array and time information array
             out_array[index_, : x_id_copy.shape[0], :] = x_id_copy[non_id_feats].values
-            id_times_array[index_, : x_id_copy.shape[0], 1] = x_id["time_to_end"].values
+            id_times_array[index_, : x_id_copy.shape[0], 1] = x_id["hours_to_end"].values
 
         return out_array.astype("float32"), id_times_array.astype("float32")
 
@@ -462,10 +472,18 @@ class DataLoader(DataTransformer):
     b) Data batching
     c) Pytorch Data Loader features (relevant to Deep Learning)_
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, data_name: str, ts_endpoints: Tuple[float, float], feat_set: Union[str, List], *args, **kwargs):
+        """
+        Object Initializer.
+
+        Params:
+        - data_name: str, name of dataset to load
+        - ts_endpoints: tuple, (ts_min, ts_max), time range to consider
+        - feat_set: str, name of feature set to use
+        """
 
         # Call parent class
-        super(DataLoader, self).__init__(*args, **kwargs)
+        super().__init__(data_name=data_name, ts_endpoints=ts_endpoints, feat_set=feat_set, *args, **kwargs)
 
         # Initialise some empty attributes
         self.train_test_ratio = None
@@ -518,7 +536,8 @@ class DataLoader(DataTransformer):
         }
         output_dic = {
             "load_config": load_config, 
-            "data_og": (x_og, y_og)
+            "data_og": (x_og, y_og),
+            "CV_folds": {}
         }
 
         # Print some base information

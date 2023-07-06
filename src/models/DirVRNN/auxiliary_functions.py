@@ -333,6 +333,7 @@ def torch_plot_clus_prob_assign_time(temp_pis_assign: torch.Tensor):
 
     # Get params and base information
     _, T, K = temp_pis_assign.shape
+    print("Shape of temp_pis_assign: ", temp_pis_assign.shape)
     clus_memb_num = torch_get_temp_clus_memb_dist(temp_pis_assign=temp_pis_assign)
 
     # Initialize figure and axis objects

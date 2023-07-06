@@ -6,7 +6,7 @@ Auxiliary Functions to train models
 """
 
 # ============= Import Libraries =============
-from src.models.Dir_VRNN.Dir_VRNN_train import DirVRNN
+from src.models.DirVRNN.train import DirVRNN
 
 
 # Load model given specified configuration and parameters

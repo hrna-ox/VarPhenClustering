@@ -13,7 +13,7 @@ import torch
 import wandb
 
 from src.data_processing.DataLoader import DataLoader
-from src.models.Dir_VRNN.model import DirVRNN
+from src.models.DirVRNN.model import DirVRNN
 
 # endregion
 
@@ -22,7 +22,7 @@ from src.models.Dir_VRNN.model import DirVRNN
 def main():
 
     # Load Configuration for Run
-    with open("src/models/Dir_VRNN/run_config.json", "r") as f:     
+    with open("src/models/DirVRNN/run_config.json", "r") as f:     
         run_config = json.load(f)
         f.close()
 
@@ -68,7 +68,10 @@ def main():
     print("Training with K={} folds".format(run_config["K_folds"]))
 
     # Iterate over folds
-    for idx, data_arrs in enumerate(data_dic["CV_folds"]):
+    for idx, (fold_key, data_arrs) in enumerate(data_dic["CV_folds"].items()):
+
+        # Print message
+        print("\n\nTraining on fold {} of {}...\n\n".format(idx+1, run_config["K_folds"]))
 
         # Load model
         model = DirVRNN(
@@ -81,7 +84,7 @@ def main():
             gate_hidden_n=run_config["gate_hidden_n"],
             bias=run_config["bias"],
             dropout=run_config["dropout"],
-            seed=run_config["seed"]  
+            seed=run_config["seed"]
         ).to(device) # type: ignore
 
         # Access Data
