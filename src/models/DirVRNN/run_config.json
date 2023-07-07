@@ -9,6 +9,7 @@
    "w_size": 2,
    "K": 6, 
    "l_size": 64,
+   "n_fwd_blocks": 1,
    "gate_hidden_l": 4,
    "gate_hidden_n": 20,
    "bias": true,

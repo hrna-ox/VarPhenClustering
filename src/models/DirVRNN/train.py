@@ -41,11 +41,12 @@ def main():
     torch.manual_seed(run_config["seed"])
 
     # Initialize WandB Session for logging metrics, results and model weights 
+    save_dir = f"exps/DirVRNN/{data_name}/{run_name}/"
     wandb.init(
         name= "{}-{}-{}".format(model_name, data_name, run_name),
         entity="hrna-ox", 
-        dir=f"exps/Dir_VRNN/{data_name}/{run_name}/",
-        project="Dir_VRNN", 
+        dir=save_dir,
+        project="DirVRNN", 
         config=run_config
     )
 
@@ -80,6 +81,7 @@ def main():
             w_size=run_config["w_size"],
             K=run_config["K"],
             l_size=run_config["l_size"],
+            n_fwd_blocks=run_config["n_fwd_blocks"],
             gate_hidden_l=run_config["gate_hidden_l"],
             gate_hidden_n=run_config["gate_hidden_n"],
             bias=run_config["bias"],
@@ -99,6 +101,7 @@ def main():
             lr=run_config["lr"],
             batch_size=run_config["batch_size"],
             num_epochs=run_config["num_epochs"],
+            save_dir=save_dir
         )
 
             
@@ -120,7 +123,7 @@ def main():
 
         # Run model on test data
         model.eval()
-        log = model.predict(X_test, y_test, run_config=run_config)
+        log = model.predict(X_test, y_test, run_config=run_config, save_dir=save_dir)
 
         # Finish recording session and save outputs
         wandb.finish()

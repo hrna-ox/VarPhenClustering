@@ -87,9 +87,6 @@ def _get_features(feat_set: Union[str, List[str]], data_name: str) -> List[str]:
 
     # Ensure uniqueness
     feat_subset = sorted(list(set(feat_subset)))
-    print(
-        f"\n{data_name} data has been sub-setted to the following features: \n {feat_subset}."
-    )
 
     return feat_subset
 
@@ -113,7 +110,7 @@ def _numpy_forward_fill(array):
     array_out = array_out[
         np.arange(array_out.shape[0])[:, None, None], # type: ignore
         inter_array,
-        np.arange(array_out.shape[-1])[None, None, :],
+        np.arange(array_out.shape[-1])[None, None, :], # type: ignore
     ]
 
     return array_out
@@ -217,8 +214,6 @@ class CSVLoader:
         self.data_name = data_name.upper()
         self.id_col = "stay_id"
         self.time_col = "sampled_time_to_end"
-
-        print("\n \n Data Name is :", self.data_name, "\n\n")
 
         super().__init__(*args, **kwargs)
 
@@ -541,11 +536,10 @@ class DataLoader(DataTransformer):
         }
 
         # Print some base information
-        print(f"""
-            Data {self.data_name} successfully loaded for features {self.features} and outcomes {self.outcomes}.
-            (X, y) shape: {x_arr.shape}, {y_arr.shape}
-            Outcome Distribution: {y_og.sum(axis=0).astype(int)}
-            """
+        print(f"Data {self.data_name} successfully loaded for features {self.features} and outcomes {self.outcomes}.",
+            f"(X, y) shape: {x_arr.shape}, {y_arr.shape}",
+            f"Outcome Distribution: {y_og.sum(axis=0).astype(int)}",
+            sep="\n"
         )  
         
         # Separate into train-test data

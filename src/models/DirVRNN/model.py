@@ -42,6 +42,7 @@ class DirVRNN(nn.Module):
                 w_size: int,
                 K: int, 
                 l_size: int = 10,
+                n_fwd_blocks: int = 1,
                 gate_hidden_l: int = 2,
                 gate_hidden_n: int = 20,
                 bias: bool = True,
@@ -58,6 +59,7 @@ class DirVRNN(nn.Module):
             - w_size: window size over which to update cell state and generate data.
             - K: number of clusters to consider.
             - l_size: dimensionality of latent space (default = 10).
+            - n_fwd_blocks: number of forward blocks to predict (int, default=1).
             - gate_hidden_l: number of hidden layers for gate networks (default = 2).
             - gate_hidden_n: number of nodes of hidden layers for gate networks (default = 20).
             - bias: whether to include bias terms in MLPs (default = True).
@@ -70,7 +72,7 @@ class DirVRNN(nn.Module):
 
         # Initialise input parameters
         self.i_size, self.o_size, self.w_size = i_size, o_size, w_size
-        self.K, self.l_size = K, l_size
+        self.K, self.l_size, self.n_fwd_blocks = K, l_size, n_fwd_blocks
         self.gate_l, self.gate_n = gate_hidden_l, gate_hidden_n
         self.device, self.seed = device, seed
 
@@ -209,19 +211,24 @@ class DirVRNN(nn.Module):
         # Extract dimensions
         batch_size, seq_len, input_size = x.size()
 
-        # Basic information about the sequence and number of time-steps
-        try:
-            assert seq_len % self.w_size == 0 # Sequence length must be divisible by window size
-        
-        except AssertionError:
+        # Pre-fill the data tensor with zeros if we have a sequence length that is not a multiple of w_size
+        remainder = seq_len % self.w_size
+        if remainder != 0:
 
-            # Get list of arrays to disregard
-            num_discard = seq_len % self.w_size
-            print(f"Sequence length must be divisible by window size. Data has {seq_len} time steps, and window size is {self.w_size}. We disregard the first {num_discard} time steps.")
-            self.forward(x[:, num_discard:, :], y[:, :])
+            # Calculate number of zeros to pre-append and the minimum index from which real data exists
+            timestp_to_append = self.w_size - remainder
+
+            # Pre-pend the input data with zeros to make it a multiple of w_size
+            zeros_append = torch.zeros(batch_size, timestp_to_append, input_size, device=self.device)
+            x = torch.cat((zeros_append, x), dim=1)
+
+            # Update seq_len
+            seq_len = x.size(1)
+            assert (seq_len % self.w_size == 0) # Sequence length is not a multiple of w_size
+
         
         # Get number of time steps that we have
-        num_time_steps = int(seq_len / self.w_size) - 1
+        num_time_steps = int(seq_len / self.w_size)
 
 
         # Initialization of pi, z, and h assignments
@@ -249,7 +256,7 @@ class DirVRNN(nn.Module):
         # ================== Iteration through time-steps  ==============
 
         # We iterate over all windows of our analysis, this includes the last window where we look into the future and do not compute losses.
-        for window_id in range(num_time_steps + 1):
+        for window_id in range(num_time_steps + self.n_fwd_blocks):
             "Iterate through each window block"
 
             # Bottom and high indices
@@ -258,15 +265,20 @@ class DirVRNN(nn.Module):
             # First we estimate the observations for the incoming window given current estimates. This is of shape (bs, w_size, 2*input_size)
             _, _, data_gen = self.decoder_pass(h=h, z=est_z)
 
-            # Decompose obvs_pred into mean and log-variance - shape is (bs, T, 2 * input_size)
+            # Decompose obvs_pred into mean and log-variance - shape is (bs, w_size, 2 * input_size)
             mu_g, logvar_g = torch.chunk(data_gen, chunks=2, dim=-1)
             var_g = torch.exp(logvar_g) + eps
 
             for _w_id, t in enumerate(range(lower_t, higher_t)):
                 # Estimate alphas for each time step within the window. 
 
-                # Subset observation to time t
-                x_t = x[:, t, :]
+                # Use true data if within the original data size, else use generated data
+                if t < seq_len:
+                    x_t = x[:, t, :]
+
+                else:
+                    gen_samples = model_utils.gen_diagonal_mvn(mu_g=mu_g, log_var_g = logvar_g)
+                    x_t = gen_samples[:, _w_id, :]
 
                 # Compute alphas of prior and encoder networks
                 alpha_prior = self.prior_pass(h=h)
@@ -331,7 +343,8 @@ class DirVRNN(nn.Module):
             K_fold_idx: int = 1,
             lr: float = 0.001, 
             batch_size: int = 32,
-            num_epochs: int = 100
+            num_epochs: int = 100,
+            save_dir: Union[str, None] = None
         ):
         """
         Method to train model given train and validation data, as well as training parameters.
@@ -343,6 +356,7 @@ class DirVRNN(nn.Module):
             - lr: learning rate for optimizer.
             - batch_size: batch size for training.
             - num_epochs: number of epochs to train for.
+            - save_dir: directory to save model checkpoints. If None, then no checkpoints are saved.
 
         Outputs:
             - loss: final loss value.
@@ -425,9 +439,9 @@ class DirVRNN(nn.Module):
             
             # Check performance on validation set if exists
             if X_val is not None and y_val is not None:
-                self.validate(X_val, y_val, epoch=epoch)
+                self.validate(X_val, y_val, epoch=epoch, save_dir=save_dir)
     
-    def validate(self, X, y, epoch: int, class_names: List = []):
+    def validate(self, X, y, epoch: int, class_names: List = [], feat_names: List = [], save_dir: Union[str, None] = None):
         """
         Compute Performance on Val Dataset.
 
@@ -436,6 +450,8 @@ class DirVRNN(nn.Module):
             - y: outcome data of shape (bs, output_size)
             - epoch: int indicating epoch number
             - class_names: List (optional): list of class names for logging
+            - feat_names: List (optional): list of feature names for logging
+            - save_dir: str (optional): directory to save predictions to
         """
 
         # Set model to evaluation mode 
@@ -481,26 +497,31 @@ class DirVRNN(nn.Module):
                 )
 
                 # Log results
-                model_params={
-                    "c_means": self.c_means,
-                    "log_c_vars": self.log_c_vars,
-                    "seed": self.seed,
-                }
-                logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=epoch, mode="val", class_names=class_names)
+                if save_dir is not None:
+                    model_params={
+                        "c_means": self.c_means,
+                        "log_c_vars": self.log_c_vars,
+                        "seed": self.seed,
+                    }
+
+                    logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=epoch, mode="val", class_names=class_names, feat_names=feat_names, save_dir=save_dir)
 
                 return val_loss, history_objects
 
-    def predict(self, X ,y, run_config: Union[Dict, None] = None, class_names: List = []):
+    def predict(self, X ,y, run_config: Union[Dict, None] = None, class_names: List = [], feat_names: List = [], save_dir: Union[str, None] = None):
         # Similar to forward method, but focus on inner computations and tracking objects for the model.
         _, history_objects = self.forward(X, y)      # Run forward pass
 
         # Log results
-        model_params={
-            "c_means": self.c_means,
-            "log_c_vars": self.log_c_vars,
-            "seed": self.seed,
-        }
-        logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=0, mode="test", class_names=class_names)
+        if save_dir is not None:
+                
+            model_params={
+                "c_means": self.c_means,
+                "log_c_vars": self.log_c_vars,
+                "seed": self.seed,
+            }
+
+            logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=0, mode="test", class_names=class_names, feat_names=feat_names)
 
         # Append Test data
         history_objects["X_test"] = X

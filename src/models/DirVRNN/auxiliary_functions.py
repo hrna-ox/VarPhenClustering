@@ -8,6 +8,7 @@ intermediate object analysis.
 """
 
 # region =============== IMPORT LIBRARIES ===============
+from typing import List, Union
 import numpy as np
 import torch
 from torch.nn.functional import one_hot
@@ -18,6 +19,7 @@ from tsnecuda import TSNE
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import seaborn as sns
+import wandb
 
 # endregion
 
@@ -311,6 +313,7 @@ def plot_clus_memb_evol(temp_clus_memb: torch.Tensor):
         ax.plot(range(1, T + 1), temp_clus_memb[:, k], label=f"Cluster {k}", linewidth=2, linestyle='--', color=colors[k])
 
     # Decorate axes
+    ax.set_xticks(list(range(1, T+1)))
     ax.set_xticklabels(range(1, T+1))
     ax.set_xlabel("Time")
     ax.set_ylabel("Num")
@@ -354,6 +357,60 @@ def torch_plot_clus_prob_assign_time(temp_pis_assign: torch.Tensor):
         axs[clus_idx].set_title(f"Cluster {clus_idx}")
         
     return fig, axs
+
+def plot_samples(X_data_npy: np.ndarray, samples: np.ndarray, num_samples: int = 10, feat_names: List = [], time_idxs: Union[List, np.ndarray] = []):
+    """
+    Line Plots of generated samples compared with the true data for num_samples different patients.
+
+    Params:
+        - X_data_npy: np.ndarray of shape (N, bs, D) with true input data.
+        - samples: np.ndarray of shape (N, bs, D) with generated data.
+        - num_samples: int indicating the number of patients to plot.
+        - feat_names: List of strings with feature names.
+        - time_idxs: List of values of time indices 
+
+    Returns:
+    - A set of fig, ax plots with comparison between true and false for each patient.
+    """
+    if time_idxs == []:
+        time_idxs = np.array(range(1, X_data_npy.shape[1] + 1))[::-1]
+    
+    else:
+        time_idxs = np.array(time_idxs)
+
+    # Sample 10 random patients and plot to Wandb
+    random_pats_10 = np.random.randint(low=0, high=X_data_npy.shape[0], size=(10,))
+    save_plots = {}
+
+    for _pat_id in random_pats_10:
+
+        # Select true data and generated data
+        _x_pat = X_data_npy[_pat_id, :, :]
+        _x_gen = samples[_pat_id, :, :]
+
+        # Initialize figure and axis objects
+        nrows, ncols = int(np.ceil(len(feat_names)/3)), 3
+        fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(30,15), sharex=True, sharey=False)
+        axs = ax.flatten()
+
+        # Iterate over feature
+        for _idx, feat in enumerate(feat_names):
+
+            # Plot 
+            axs[_idx].plot(time_idxs, _x_pat[:, _idx], label="True", color="blue", linestyle="-", marker="o")
+            axs[_idx].plot(time_idxs, _x_gen[:, _idx], label="Gen", color="green", linestyle="--", marker="*")
+
+            # Decorate axes
+            axs[_idx].set_ylabel(feat)
+            axs[_idx].set_xlabel("Time to Endpoint (hours)")
+
+        # Add legends
+        axs[0].legend()
+        axs[0].suptitle("Patient {}".format(_pat_id))
+
+        save_plots[_pat_id] = fig, ax
+
+    return save_plots
 
 def torch_plot_phenotypes(phens: torch.Tensor, class_names=[]):
     """

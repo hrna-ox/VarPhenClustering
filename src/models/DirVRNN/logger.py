@@ -8,6 +8,7 @@ This file implements a logger function to plot and log useful information about 
 """
 
 # region =============== IMPORT LIBRARIES ===============
+import pickle
 import numpy as np
 import pandas as pd
 import torch
@@ -23,7 +24,7 @@ import src.models.losses_and_metrics as LM_utils
 # endregion
 
 # region =============== MAIN ===============
-def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch: int = 0, mode: str = "val", class_names: List = []):
+def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch: int = 0, mode: str = "val", class_names: List = [], feat_names: List = [], save_dir: str = "exps/Dir_VRNN/"):
     """
     Logger for the model. 
 
@@ -35,6 +36,8 @@ def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch
     - epoch: current epoch for training. This parameter is disregarded if mode is set to 'test'.
     - mode: str indicating whether the logger is for testing or validation.
     - class_names: list of class names for the outcome visualization and analysis
+    - feat_names: list of feature names for the input data visualization and analysis
+    - save_dir: directory to save the plots and metrics.
 
     Returns:
     - None, saves into wandb logger
@@ -75,49 +78,28 @@ def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch
     clus_mean_sep = model_utils.torch_clus_means_separability(clus_means=clus_means)
 
     # Log
+    _mean_df = pd.DataFrame(
+        data=clus_means.detach().numpy(),
+        index=[f"Cluster {i}" for i in range(clus_means.shape[0])],
+        columns=[f"F{i}" for i in range(clus_means.shape[1])]
+    )
+    _vars_df = pd.DataFrame(
+        data=clus_vars.detach().numpy().reshape(-1, 1),
+        index=[f"Cluster {i}" for i in range(clus_vars.shape[0])],
+        columns=["Variance"]
+    )
     wandb.log({
             f"{mode}/cluster_means": 
-                wandb.Table(
-                    data=clus_means.detach().numpy(),
-                ),
+                wandb.Table(dataframe=_mean_df),
             f"{mode}/cluster_vars": 
-                wandb.Table(
-                    data=clus_vars.detach().numpy(),
-                ),
+                wandb.Table(dataframe=_vars_df),
             f"{mode}/clus_mean_sep": clus_mean_sep.detach().numpy(),
         },
         step=epoch+1
     )
     
     # Log embeddings and other vectors            
-    alpha_samples, pi_samples = log["alpha_encs"], log["pis"]
     mug_samps, logvar_samps = log["mugs"], log["log_vargs"]
-    z_samples = log["zs"]
-
-    wandb.log({
-            f"{mode}/z_samples": 
-                wandb.Table(
-                    data=z_samples.detach().numpy()
-                ),
-            f"{mode}/alpha_samples": 
-                wandb.Table(
-                    data=alpha_samples.detach().numpy()
-                ),
-            f"{mode}/pi_samples":
-                wandb.Table(
-                    data=pi_samples.detach().numpy()
-                ),
-            f"{mode}/mug_samples":
-                wandb.Table(
-                    data=mug_samps.detach().numpy()
-                ),
-            f"{mode}/logvar_samples":
-                wandb.Table(
-                    data=logvar_samps.detach().numpy()
-                )
-        },
-        step=epoch+1
-    )
 
 
     # Log Performance Scores
@@ -180,8 +162,8 @@ def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch
         f"{mode}/single_output": wandb.Table(data=single_output),
         f"{mode}/class_outputs": wandb.Table(data=class_outputs),
         f"{mode}/temp_outputs": wandb.Table(data=temp_outputs),
-        f"{mode}/roc_curve": roc_fig,
-        f"{mode}/pr_curve": pr_fig
+        f"{mode}/roc_curve": wandb.Image(roc_fig),
+        f"{mode}/pr_curve": wandb.Image(pr_fig)
     },
     step=epoch+1
 )
@@ -200,36 +182,31 @@ def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch
     )
 
 
+    # Generate Data Samples and Compare with True Occurrence
+    gen_samples = model_utils.gen_diagonal_mvn(mug_samps, logvar_samps).detach().numpy()
+
+    # Get time ids for the generated data and plot
+    time_ids = np.array(range(1, X_npy.shape[1]+1))[::-1] * 4
+    pat_plots = model_utils.plot_samples(X_npy, gen_samples, num_samples=10, feat_names=feat_names, time_idxs=time_ids)
+
+     # Log to Wandb
+    for pat_id, (fig, ax) in pat_plots.items():
+        wandb.log({
+            f"{mode}/pat_{pat_id}": wandb.Image(fig)
+        },
+        step=epoch+1
+    )
 
 
     """
 
     MISSING IMPLEMENTATION:
-    - Get Class Names
-    - Get Feature Names
-    - Better Sampling Visualization
+    - Better Phenotype Visualization
 
     """
 
-
-    # Generate Data Samples and Compare with True Occurrence
-    gen_samples = model_utils.gen_diagonal_mvn(mug_samps, logvar_samps).detach().numpy()
-
-    # Sample 10 random patients and plot to Wandb
-    random_pats_10 = torch.randint(low=0, high=X.shape[0], size=(10,))
-
-    for _pat_id in random_pats_10:
-
-        # Select true data and generated data
-        _x_pat = X_npy[_pat_id, :, :]
-        _x_gen = gen_samples[_pat_id, :, :]
-
-        # Plot to Wandb
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(_x_pat, label="True")
-        ax.plot(_x_gen, label="Generated")
-        wandb.log({
-            "test/{}-pat".format(_pat_id): wandb.Image(fig)
-        })
+    # Save outputs
+    with open(f"{save_dir}/outputs.pkl", "wb") as f:
+        pickle.dump(log, f)
 
 # endregion
