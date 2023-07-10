@@ -8,6 +8,7 @@ This file implements a logger function to plot and log useful information about 
 """
 
 # region =============== IMPORT LIBRARIES ===============
+import os
 import pickle
 import numpy as np
 import pandas as pd
@@ -63,13 +64,13 @@ def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch
     fig, ax = model_utils.plot_clus_memb_evol(temp_clus_memb=clus_memb_dist)
     
     # Log
-    wandb.log({f"{mode}/clus-memb-evolution": fig}, step=epoch+1)
+    wandb.log({f"{mode}/clus-memb-evolution": wandb.Image(fig)}, step=epoch+1)
     plt.close()
 
     
     # Get Box Plots of cluster assignments and Log
     fig, ax = model_utils.torch_plot_clus_prob_assign_time(temp_pis_assign=temp_pis)
-    wandb.log({f"{mode}/clus_assign_time_boxplot": fig}, step=epoch+1)
+    wandb.log({f"{mode}/clus_assign_time_boxplot": wandb.Image(fig)}, step=epoch+1)
     plt.close()
 
 
@@ -104,29 +105,29 @@ def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch
 
     # Log Performance Scores
     y_npy = y.detach().numpy()
-    y_pred = log["y_preds"].detach().numpy()
+    y_pred, y_pred_npy = log["y_preds"], log["y_preds"].detach().numpy()
     clus_prob = temp_pis.detach().numpy()
     X_npy = X.detach().numpy()
     class_names = [f"Class {i}" for i in range(y_pred.shape[-1])]
 
     # Compute accuracy, f1 and recall scores
-    acc = LM_utils.accuracy_score(y_true=y_npy, y_pred=y_pred)
+    acc = LM_utils.accuracy_score(y_true=y_npy, y_pred=y_pred_npy)
     
-    macro_f1 = LM_utils.macro_f1_score(y_true=y_npy, y_pred=y_pred)
-    micro_f1 = LM_utils.micro_f1_score(y_true=y_npy, y_pred=y_pred)
-    recall = LM_utils.recall_score(y_true=y_npy, y_pred=y_pred)
-    precision = LM_utils.precision_score(y_true=y_npy, y_pred=y_pred)
+    macro_f1 = LM_utils.macro_f1_score(y_true=y_npy, y_pred=y_pred_npy)
+    micro_f1 = LM_utils.micro_f1_score(y_true=y_npy, y_pred=y_pred_npy)
+    recall = LM_utils.recall_score(y_true=y_npy, y_pred=y_pred_npy)
+    precision = LM_utils.precision_score(y_true=y_npy, y_pred=y_pred_npy)
 
     # Get roc and prc
-    roc_scores = LM_utils.get_roc_auc_score(y_true=y_npy, y_pred=y_pred)
-    prc_scores = LM_utils.get_pr_auc_score(y_true=y_npy, y_pred=y_pred)
+    ovr_roc = LM_utils.get_roc_auc_score(y_true=y_npy, y_pred=y_pred)
+    prc_scores = LM_utils.get_torch_pr_auc_score(y_true=y, y_pred=y_pred).detach().numpy()
 
     # Compute Confusion Matrix
-    confusion_matrix = LM_utils.get_confusion_matrix(y_true=y_npy, y_pred=y_pred)
+    confusion_matrix = LM_utils.get_confusion_matrix(y_true=y_npy, y_pred=y_pred_npy)
 
     # Compute confusion matrix, ROC and PR curves
-    roc_fig, roc_ax = LM_utils.get_roc_curve(y_true=y_npy, y_pred=y_pred, class_names=class_names) 
-    pr_fig, pr_ax = LM_utils.get_pr_curve(y_true=y_npy, y_pred=y_pred, class_names=class_names)
+    roc_fig, roc_ax = LM_utils.get_roc_curve(y_true=y_npy, y_pred=y_pred_npy, class_names=class_names) 
+    pr_fig, pr_ax = LM_utils.get_torch_pr_curve(y_true=y, y_pred=y_pred, class_names=class_names)
 
     # Compute Data Clustering Metrics
     label_metrics = LM_utils.get_clustering_label_metrics(y_true=y_npy, clus_pred=clus_prob)
@@ -137,31 +138,31 @@ def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch
     sil, dbi, vri = unsup_metrics["sil"], unsup_metrics["dbi"], unsup_metrics["vri"]
 
     # Combine scores to single table
-    single_output = pd.Series(
+    single_output = pd.DataFrame(
         data = [acc, macro_f1, micro_f1, recall, precision],
-        index=["Accuracy", "Macro F1", "Micro F1", "Recall", "Precision"]
+        index=["Accuracy", "Macro F1", "Micro F1", "Recall", "Precision"],
+        columns=["Scores"]
     )
 
     class_outputs = pd.DataFrame(
-        data=np.vstack((roc_scores, prc_scores)),
-        index=["ROC", "PRC"],
+        data=np.vstack((ovr_roc, prc_scores)),
+        index=["ROC-OVO", "PRC"],
         columns=class_names
     )
-    
+
     temp_outputs = pd.DataFrame(
         data=np.vstack((rand, nmi, sil, dbi, vri)),
         index=["Rand", "NMI", "Silhouette", "DBI", "VRI"],
-        columns=list(range(X_npy.shape[1]))
-    )
+        columns=list(range(np.size(rand))))
 
     # Log Objects
     wandb.log({
         f"{mode}/confusion_matrix":
             wandb.Table(data=confusion_matrix, columns=[f"True {_name}" for _name in class_names], 
                         rows=[f"Pred {_name}" for _name in class_names]),
-        f"{mode}/single_output": wandb.Table(data=single_output),
-        f"{mode}/class_outputs": wandb.Table(data=class_outputs),
-        f"{mode}/temp_outputs": wandb.Table(data=temp_outputs),
+        f"{mode}/single_output": wandb.Table(dataframe=single_output),
+        f"{mode}/class_outputs": wandb.Table(dataframe=class_outputs),
+        f"{mode}/temp_outputs": wandb.Table(dataframe=temp_outputs),
         f"{mode}/roc_curve": wandb.Image(roc_fig),
         f"{mode}/pr_curve": wandb.Image(pr_fig)
     },
@@ -173,23 +174,41 @@ def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch
     prob_phens = model_utils.torch_get_temp_phens(pis_assign=temp_pis, y_true=y, mode="prob")
     onehot_phens = model_utils.torch_get_temp_phens(pis_assign=temp_pis, y_true=y, mode="one-hot")
 
-    # Log Phenotype Information
-    wandb.log({
-        f"{mode}/prob_phens": wandb.Table(data=prob_phens.detach().numpy()),
-        f"{mode}/onehot_phens": wandb.Table(data=onehot_phens.detach().numpy())
-        },
-        step=epoch+1
-    )
+    # Log Phenotype Information over time
+    K, T, O = prob_phens.shape
+    _prob_phens_npy = prob_phens.detach().numpy()
+    _onehot_phens_npy = onehot_phens.detach().numpy()
+
+    for t in range(T):
+        wandb.log({
+            f"{mode}/Phens_Prob_{t}": wandb.Table(
+                dataframe= pd.DataFrame(
+                            _prob_phens_npy[:, t, :],
+                            index=[f"C{i}" for i in range(K)],
+                            columns=class_names
+                        )
+                ),
+            f"{mode}/Phens_OH_{t}": wandb.Table(
+                dataframe= pd.DataFrame(
+                            _onehot_phens_npy[:, t, :],
+                            index=[f"C{i}" for i in range(K)],
+                            columns=class_names
+                    )
+                )   
+            },
+            step=epoch+1
+        )
 
 
     # Generate Data Samples and Compare with True Occurrence
     gen_samples = model_utils.gen_diagonal_mvn(mug_samps, logvar_samps).detach().numpy()
+    gen_samples = gen_samples[:, - X_npy.shape[1]: , :]             # Subset generated samples to match X_npy time steps
 
     # Get time ids for the generated data and plot
-    time_ids = np.array(range(1, X_npy.shape[1]+1))[::-1] * 4
+    time_ids = np.array(range(1, X_npy.shape[1]+1))[::-1] 
     pat_plots = model_utils.plot_samples(X_npy, gen_samples, num_samples=10, feat_names=feat_names, time_idxs=time_ids)
 
-     # Log to Wandb
+    # Log to Wandb
     for pat_id, (fig, ax) in pat_plots.items():
         wandb.log({
             f"{mode}/pat_{pat_id}": wandb.Image(fig)
@@ -206,6 +225,9 @@ def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch
     """
 
     # Save outputs
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+        
     with open(f"{save_dir}/outputs.pkl", "wb") as f:
         pickle.dump(log, f)
 

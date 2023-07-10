@@ -40,17 +40,6 @@ def main():
     # Set torch seed for any probability computation
     torch.manual_seed(run_config["seed"])
 
-    # Initialize WandB Session for logging metrics, results and model weights 
-    save_dir = f"exps/DirVRNN/{data_name}/{run_name}/"
-    wandb.init(
-        name= "{}-{}-{}".format(model_name, data_name, run_name),
-        entity="hrna-ox", 
-        dir=save_dir,
-        project="DirVRNN", 
-        config=run_config
-    )
-
-
     # Load Data
     data_dic = DataLoader(
         data_name=run_config["data_name"], 
@@ -70,6 +59,17 @@ def main():
 
     # Iterate over folds
     for idx, (fold_key, data_arrs) in enumerate(data_dic["CV_folds"].items()):
+
+        
+        # Initialize WandB Session for logging metrics, results and model weights 
+        save_dir = f"exps/DirVRNN/{data_name}/{run_name}/{fold_key}/"
+        wandb.init(
+            name= "{}-{}-{}-{}".format(model_name, data_name, run_name, fold_key),
+            entity="hrna-ox", 
+            dir=save_dir,
+            project="DirVRNN", 
+            config=run_config
+        )
 
         # Print message
         print("\n\nTraining on fold {} of {}...\n\n".format(idx+1, run_config["K_folds"]))
@@ -101,7 +101,9 @@ def main():
             lr=run_config["lr"],
             batch_size=run_config["batch_size"],
             num_epochs=run_config["num_epochs"],
-            save_dir=save_dir
+            save_dir=save_dir,
+            class_names=data_dic["load_config"]["outcomes"],
+            feat_names=data_dic["load_config"]["features"],
         )
 
             
@@ -117,13 +119,15 @@ def main():
         # Run on Test data
         print("\n\nRunning model on test data...\n\n")
 
-        # Prepare Test Data
-        X_test = torch.Tensor(x_test, device=device)
-        y_test = torch.Tensor(y_test, device=device)
-
         # Run model on test data
         model.eval()
-        log = model.predict(X_test, y_test, run_config=run_config, save_dir=save_dir)
+        log = model.predict(
+            x_test, y_test, 
+            run_config=run_config, 
+            save_dir=save_dir, 
+            class_names=data_dic["load_config"]["outcomes"], 
+            feat_names=data_dic["load_config"]["features"]
+        )
 
         # Finish recording session and save outputs
         wandb.finish()

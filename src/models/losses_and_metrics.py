@@ -9,8 +9,9 @@ Defines Loss Functions for the various models.
 from typing import List
 from matplotlib import pyplot as plt
 from matplotlib.cm import get_cmap
+
 import torch
-import torch.nn as nn
+from torchmetrics import AveragePrecision
 
 import numpy as np
 import sklearn.metrics as metrics
@@ -149,13 +150,15 @@ def macro_f1_score(y_true: np.ndarray, y_pred: np.ndarray):
         fp = np.sum((labels_pred == class_idx) & (labels_true != class_idx))
         fn = np.sum((labels_pred != class_idx) & (labels_true == class_idx))
 
-        # Compute precision and recall
-        precision = np.divide(tp, tp + fp)
-        recall = np.divide(tp, tp + fn)
+        # Compute precision and recall while disregarding any potential issues with division by zero
+        with np.errstate(divide='ignore', invalid='ignore'):
 
-        # Compute F1 score and append
-        f1 = 2 * np.divide(precision * recall, precision + recall)
-        f1_scores.append(f1)
+            precision = np.divide(tp, tp + fp)
+            recall = np.divide(tp, tp + fn)
+
+            # Compute F1 score and append
+            f1 = 2 * np.divide(precision * recall, precision + recall + eps)
+            f1_scores.append(f1)
 
     return np.mean(f1_scores)
 
@@ -242,9 +245,10 @@ def precision_score(y_true: np.ndarray, y_pred: np.ndarray):
     FP = np.sum((labels_pred != labels_true) & (labels_true == 0))
 
     # Compute precision
-    precision = TP / (TP + FP)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        precision = TP / (TP + FP)
 
-    return precision
+        return precision
 
 def get_clustering_label_metrics(y_true: np.ndarray, clus_pred: np.ndarray):
     """
@@ -343,33 +347,32 @@ def get_roc_auc_score(y_true: np.ndarray, y_pred: np.ndarray):
     """
     
     # Convert to labels
-    labels_pred = np.argmax(y_pred, axis=-1)
-    labels_true = np.argmax(y_true, axis=-1)
+    labels_true = np.argmax(y_true, axis=-1).astype(int)
 
     # Compute Roc per class
-    roc_scores = metrics.roc_auc_score(labels_true, labels_pred, average=None,
+    ovr_roc_scores = metrics.roc_auc_score(labels_true, y_score=y_pred, average=None,
                             multi_class="ovr")
+    
+    return ovr_roc_scores
 
-    return roc_scores
-
-def get_pr_auc_score(y_true: np.ndarray, y_pred: np.ndarray):
+def get_torch_pr_auc_score(y_true: torch.Tensor, y_pred: torch.Tensor):
     """
     Compute PR AUC score between outcomes y_true, and predicted outcomes y_pred.
 
     Args:
-        y_true (np.ndarray): (N, O) array of one-hot encoded outcomes.
-        y_pred (np.ndarray): (N, O) array of outcome probability predictions.
+        y_true (torch.Tensor): (N, O) array of one-hot encoded outcomes.
+        y_pred (torch.Tensor): (N, O) array of outcome probability predictions.
 
     Returns:
-        pr_auc (float): scalar PR AUC score.
+        pr_auc (torch.Tensor): (O,) array of PR AUC scores per class.
     """
     
     # Convert to labels
-    labels_pred = np.argmax(y_pred, axis=-1)
-    labels_true = np.argmax(y_true, axis=-1)
+    labels_true = torch.argmax(y_true, dim=-1)
 
-    # Compute Roc per class
-    pr_scores = metrics.average_precision_score(labels_true, labels_pred, average=None)
+    # Compute Area under the Curve for the Precision Recall Curve for each class
+    _metric_wrapper  = AveragePrecision(task="multiclass", num_classes = y_true.shape[1], average=None)
+    pr_scores = _metric_wrapper(y_pred, labels_true)
 
     return pr_scores
 
@@ -445,10 +448,13 @@ def get_roc_curve(y_true: np.ndarray, y_pred: np.ndarray, class_names: List[str]
 
     fig.legend()
 
+    # Close all open figures
+    plt.close()
+
     return fig, ax
 
 
-def get_pr_curve(y_true: np.ndarray, y_pred: np.ndarray, class_names: List[str] = []):
+def get_torch_pr_curve(y_true: torch.Tensor, y_pred: torch.Tensor, class_names: List[str] = []):
     """
     Compute PR curve between outcomes y_true, and predicted outcomes y_pred.
 
@@ -460,9 +466,9 @@ def get_pr_curve(y_true: np.ndarray, y_pred: np.ndarray, class_names: List[str] 
     num_classes = y_true.shape[1]
     if class_names == []:
         class_names = [f"Class {i}" for i in range(num_classes)]
-    pr_scores = get_pr_auc_score(y_true, y_pred)
+    pr_scores = get_torch_pr_auc_score(y_true, y_pred).detach().numpy()
 
-    # Initialize figure
+    # Initialize figure 
     fig, ax = plt.subplots(figsize=(10, 10))
     colors = get_cmap("tab10").colors # type: ignore
 
@@ -488,6 +494,8 @@ def get_pr_curve(y_true: np.ndarray, y_pred: np.ndarray, class_names: List[str] 
     ax.set_ylabel("Precision")
 
     fig.legend()
+    # Close all open figures
+    plt.close()
 
     return fig, ax
 

@@ -6,8 +6,6 @@ Model file to define GC-DaPh class.
 """
 
 # ============= IMPORT LIBRARIES ==============
-import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 import wandb
@@ -22,7 +20,6 @@ import src.models.DirVRNN.auxiliary_functions as model_utils
 from src.models.DirVRNN.auxiliary_functions import eps
 from src.models.DirVRNN.logger import logger
 
-import matplotlib.pyplot as plt
 
 
 # region DirVRNN
@@ -344,7 +341,9 @@ class DirVRNN(nn.Module):
             lr: float = 0.001, 
             batch_size: int = 32,
             num_epochs: int = 100,
-            save_dir: Union[str, None] = None
+            save_dir: Union[str, None] = None,
+            class_names: List = [],
+            feat_names: List = [],
         ):
         """
         Method to train model given train and validation data, as well as training parameters.
@@ -357,6 +356,8 @@ class DirVRNN(nn.Module):
             - batch_size: batch size for training.
             - num_epochs: number of epochs to train for.
             - save_dir: directory to save model checkpoints. If None, then no checkpoints are saved.
+            - class_names: list of class names for outcome variable.
+            - feat_names: list of feature names for input data.
 
         Outputs:
             - loss: final loss value.
@@ -421,9 +422,9 @@ class DirVRNN(nn.Module):
             epoch_out = train_out / len(train_loader)
 
             # Print Message at the end of each epoch with the main loss and all auxiliary loss functions
-            print("Train epoch {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
-                epoch + 1, 100, 
-                train_loss.item(), epoch_loglik.item(), epoch_kl.item(), epoch_out.item()))
+            print("Train {} ({:.0f}%):  [loss {:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
+                epoch, 100, 
+                train_loss.item(), epoch_loglik.item(), epoch_kl.item(), epoch_out.item()), end="     ")
                 
             
             # Log objects to Weights and Biases
@@ -439,7 +440,7 @@ class DirVRNN(nn.Module):
             
             # Check performance on validation set if exists
             if X_val is not None and y_val is not None:
-                self.validate(X_val, y_val, epoch=epoch, save_dir=save_dir)
+                self.validate(X_val, y_val, epoch=epoch, save_dir=save_dir, class_names=class_names, feat_names=feat_names)
     
     def validate(self, X, y, epoch: int, class_names: List = [], feat_names: List = [], save_dir: Union[str, None] = None):
         """
@@ -456,7 +457,7 @@ class DirVRNN(nn.Module):
 
         # Set model to evaluation mode 
         self.eval()
-        iter_str = f"val epoch {epoch}"
+        iter_str = f"val {epoch}"
 
         # Prepare Data
         val_data = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
@@ -487,7 +488,7 @@ class DirVRNN(nn.Module):
 
 
                 # Print message
-                print("Predict {} ({:.0f}%):  [L{:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
+                print("{} ({:.0f}%):  [loss {:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
                     iter_str, 100, 
                     val_loss.item(), 
                     torch.sum(log_lik).item(), 
@@ -509,26 +510,39 @@ class DirVRNN(nn.Module):
                 return val_loss, history_objects
 
     def predict(self, X ,y, run_config: Union[Dict, None] = None, class_names: List = [], feat_names: List = [], save_dir: Union[str, None] = None):
-        # Similar to forward method, but focus on inner computations and tracking objects for the model.
-        _, history_objects = self.forward(X, y)      # Run forward pass
+        """Similar to forward method, but focus on inner computations and tracking objects for the model."""
 
-        # Log results
-        if save_dir is not None:
-                
-            model_params={
-                "c_means": self.c_means,
-                "log_c_vars": self.log_c_vars,
-                "seed": self.seed,
-            }
+        # Set model to evaluation mode 
+        self.eval()
 
-            logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=0, mode="test", class_names=class_names, feat_names=feat_names)
+        # Prepare Data
+        test_data = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
+        test_loader = DataLoader(test_data, batch_size=X.shape[0], shuffle=False)
 
-        # Append Test data
-        history_objects["X_test"] = X
-        history_objects["y_test"] = y
-        history_objects["run_config"] = run_config
+        # Apply forward prediction
+        with torch.inference_mode():
+            for X, y in test_loader:
 
-        return history_objects
+                # Pass data through model
+                _, history_objects = self.forward(X, y)      # Run forward pass
+
+                # Log results
+                if save_dir is not None:
+                        
+                    model_params={
+                        "c_means": self.c_means,
+                        "log_c_vars": self.log_c_vars,
+                        "seed": self.seed,
+                    }
+
+                    logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=0, mode="test", class_names=class_names, feat_names=feat_names)
+
+                # Append Test data
+                history_objects["X_test"] = X
+                history_objects["y_test"] = y
+                history_objects["run_config"] = run_config
+
+                return history_objects
     
     # Useful methods for model
     def x_feat_extr(self, x):

@@ -264,9 +264,6 @@ def torch_get_temp_phens(pis_assign: torch.Tensor, y_true: torch.Tensor, mode: s
         assert mode in ["prob", "one-hot"]
     except AssertionError:
         raise ValueError("mode must be either 'prob' or 'one-hot'.")
-    
-    # Print message
-    print(f"Computing phenotypes using mode '{mode}'.")
 
     # Get params
     N, T, K = pis_assign.shape
@@ -319,6 +316,9 @@ def plot_clus_memb_evol(temp_clus_memb: torch.Tensor):
     ax.set_ylabel("Num")
 
     ax.set_title("Plot of cluster membership evolution over time")
+    
+    # Close all open figures
+    plt.close()
 
     return fig, ax
 
@@ -341,7 +341,7 @@ def torch_plot_clus_prob_assign_time(temp_pis_assign: torch.Tensor):
     # Initialize figure and axis objects
     nrows, ncols = int(np.ceil(K / 2)), 2
     fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10,5), sharex=True, sharey=True)
-    axs = ax.flatten()
+    axs = ax.flatten() # type: ignore
 
     # Iterate over clusters
     for clus_idx in range(K):
@@ -355,6 +355,9 @@ def torch_plot_clus_prob_assign_time(temp_pis_assign: torch.Tensor):
         axs[clus_idx].set_xlabel("Time")
         axs[clus_idx].set_ylabel("Prob")
         axs[clus_idx].set_title(f"Cluster {clus_idx}")
+
+    # Close all open figures
+    plt.close()
         
     return fig, axs
 
@@ -379,10 +382,10 @@ def plot_samples(X_data_npy: np.ndarray, samples: np.ndarray, num_samples: int =
         time_idxs = np.array(time_idxs)
 
     # Sample 10 random patients and plot to Wandb
-    random_pats_10 = np.random.randint(low=0, high=X_data_npy.shape[0], size=(10,))
+    random_pats = np.random.randint(low=0, high=X_data_npy.shape[0], size=(num_samples,))
     save_plots = {}
 
-    for _pat_id in random_pats_10:
+    for _pat_id in random_pats:
 
         # Select true data and generated data
         _x_pat = X_data_npy[_pat_id, :, :]
@@ -406,9 +409,12 @@ def plot_samples(X_data_npy: np.ndarray, samples: np.ndarray, num_samples: int =
 
         # Add legends
         axs[0].legend()
-        axs[0].suptitle("Patient {}".format(_pat_id))
+        fig.suptitle("Patient {}".format(_pat_id))
 
         save_plots[_pat_id] = fig, ax
+    
+        # Close all open figures
+        plt.close()
 
     return save_plots
 

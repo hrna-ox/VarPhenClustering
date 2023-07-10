@@ -349,7 +349,7 @@ class DataTransformer(CSVLoader):
 
             # Do things to y
             outcomes = _get_features(feat_set="outcomes", data_name=self.data_name)
-            y_data = y[outcomes]
+            y_data = y[outcomes] # type: ignore
             y_out = y_data.to_numpy().astype("float32")
 
             # Check data loaded correctly
