@@ -213,8 +213,8 @@ def recall_score(y_true: np.ndarray, y_pred: np.ndarray):
     labels_true = np.argmax(y_true, axis=-1)
 
     # Compute TP, FP, FN
-    TP = torch.sum((labels_pred == labels_true) & (labels_true == 1))
-    FN = torch.sum((labels_pred != labels_true) & (labels_true == 1))
+    TP = np.sum((labels_pred == labels_true) & (labels_true == 1))
+    FN = np.sum((labels_pred != labels_true) & (labels_true == 1))
 
     # Compute recall
     recall = TP / (TP + FN)
@@ -238,8 +238,8 @@ def precision_score(y_true: np.ndarray, y_pred: np.ndarray):
     labels_true = np.argmax(y_true, axis=-1)
 
     # Compute TP, FP, FN
-    TP = torch.sum((labels_pred == labels_true) & (labels_true == 1))
-    FP = torch.sum((labels_pred != labels_true) & (labels_true == 0))
+    TP = np.sum((labels_pred == labels_true) & (labels_true == 1))
+    FP = np.sum((labels_pred != labels_true) & (labels_true == 0))
 
     # Compute precision
     precision = TP / (TP + FP)
