@@ -1,5 +1,6 @@
 # To ignore
 **/data/**/*
+**/exps/**/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
