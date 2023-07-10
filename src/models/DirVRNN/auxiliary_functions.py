@@ -418,41 +418,122 @@ def plot_samples(X_data_npy: np.ndarray, samples: np.ndarray, num_samples: int =
 
     return save_plots
 
-def torch_plot_phenotypes(phens: torch.Tensor, class_names=[]):
+def torch_line_plot_phenotypes_per_outcome(phens: torch.Tensor, class_names=[]):
     """
-    Make Bar Plots for Cluster phenotype Information to show how they evolve over time.
+    Make Line Plots to showcase cluster phenotype evolution over time.
 
     Args:
         - phens: numpy array of shape (K, T, O), with cluster phenotypes over time, last dimension sums to 1.
         - class_names: list of size 0 with class names (if empty, then make class names).
 
     Returns:
-    - fig, ax: matplotlib figure and axis objects. For each plot, we plot the temporal evolution of cluster phenotypes.
+    - fig, ax: matplotlib figure and axis objects. Each subplot denotes the probability of each outcome class over time for 
+    all clusters.
     """
 
     # Get params and base information
-    """
     K, T, O = phens.shape
-    if len(class_names) == 0:
+    if class_names == []:
         class_names = [f"Class {i}" for i in range(O)]
 
     # Initialize figure and axis objects
-    nrows, ncols = torch.ceil(K / torch.Tensor(2)).int(), 2
+    nrows, ncols = int(np.ceil(O / 2)), 2
     fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10,5), sharex=True, sharey=True)
     axs = ax.flatten()
 
+    # Get colors
+    colors = cm.get_cmap("tab10").colors  # type: ignore
+
     # Iterate over clusters
-    for clus_idx in range(K):
+    _time_idxs = np.array(range(1, T + 1))[::-1]
+    for outc_idx, outc in enumerate(class_names):
 
-        # Iterate over time
-        for t in range(T):
+        # Iterate over clusters
+        for k in range(K):
 
-            
+            # Make Line Plot
+            axs[outc_idx].plot(_time_idxs, phens[k, :, outc_idx], label=f"C{k}",
+                                color=colors[k], linestyle="-", marker="o")
 
-        axs[clus_idx].set_xlabel("Class")
-        axs[clus_idx].set_ylabel("Prob")
-        axs[clus_idx].set_title(f"Cluster {clus_idx}")
+        # Decorate Axes
+        axs[outc_idx].set_xlabel("Class")
+        axs[outc_idx].set_ylabel("Prob")
+        axs[outc_idx].set_title(outc)
+
+        # Add Legend
+        axs[outc_idx].legend()
+
+    # Edit Grid and labels
+    axs[0].set_xticks(_time_idxs)
+    axs[0].set_xticklabels(_time_idxs)
+    axs[0].set_yticks(np.arange(0, 1.1, 0.1))
+    axs[0].set_yticklabels(np.arange(0, 1.1, 0.1))
+
+    # Add figure title
+    fig.suptitle("Cluster Phenotypes over time per outcome")
+
+    # Close all open figures
+    plt.close()
         
     return fig, axs
+
+def torch_line_plot_phenotypes_per_cluster(phens: torch.Tensor, class_names=[]):
     """
+    Make Line Plots to showcase cluster phenotype evolution over time.
+
+    Args:
+        - phens: numpy array of shape (K, T, O), with cluster phenotypes over time, last dimension sums to 1.
+        - class_names: list of size 0 with class names (if empty, then make class names).
+
+    Returns:
+    - fig, ax: matplotlib figure and axis objects. Each subplot denotes the probability of each outcome class over time for 
+    all clusters.
+    """
+
+    # Get params and base information
+    K, T, O = phens.shape
+    if class_names == []:
+        class_names = [f"Class {i}" for i in range(O)]
+
+    # Initialize figure and axis objects
+    nrows, ncols = int(np.ceil(K / 2)), 2
+    fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10,5), sharex=True, sharey=True)
+    axs = ax.flatten()
+
+    # Get colors
+    colors = cm.get_cmap("tab10").colors # type: ignore
+
+    # Iterate over clusters
+    _time_idxs = np.array(range(1, T + 1))[::-1]
+    for k in range(K):
+
+        # Iterate over clusters
+        for outc_idx, outc in enumerate(class_names):
+
+            # Make Line Plot
+            axs[k].plot(_time_idxs, phens[k, :, outc_idx], label=f"{outc}",
+                                color=colors[outc_idx], linestyle="-", marker="o")
+
+        # Decorate Axes
+        axs[k].set_xlabel("Class")
+        axs[k].set_ylabel("Prob")
+        axs[k].set_title(f"Cluster {k}")
+
+        # Add Legend
+        axs[k].legend()
+
+    # Edit Grid and labels
+    axs[0].set_xticks(_time_idxs)
+    axs[0].set_xticklabels(_time_idxs)
+    axs[0].set_yticks(np.arange(0, 1.1, 0.1))
+    axs[0].set_yticklabels(np.arange(0, 1.1, 0.1))
+
+    # Add figure title
+    fig.suptitle("Cluster Phenotypes over time per cluster")
+
+    # Close all open figures
+    plt.close()
+        
+    return fig, axs
+    
 # endregion

@@ -200,6 +200,12 @@ class DirVRNN(nn.Module):
         the updated alpha approximates the posterior, and c) outcome loss, taken at the last time step, which 
         indicates whether we are able to predict the outcome correctly. Losses are computed at each time step
         for all windows except the latter, as it denotes a 'look' into the future.
+
+        Losses are saved as:
+        - - ELBO: Negative Evidence Lower Bound (Log Lik - KL_loss + outcome_loss), averaged over batch.
+        - Log Likelihood: Log Likelihood of data, averaged over batch, and saved for each time step.
+        - KL Loss: KL Loss between prior and posterior, averaged over batch, and saved for each time step.
+        - Outcome Loss: Loss of outcome prediction, averaged over batch.
         """
 
         # ========= Define relevant variables and initialise variables ===========
@@ -392,6 +398,7 @@ class DirVRNN(nn.Module):
             train_out = torch.zeros(1, device=self.device)
 
             # Iterate through batches
+            batch_id = 0
             for batch_id, (x, y) in enumerate(train_loader):
 
                 # Zero out gradients for each batch
@@ -412,25 +419,26 @@ class DirVRNN(nn.Module):
                 train_out += batch_outl                 # Add batch loss total loss over batch
 
                 # Print message of loss per batch, which is re-setted at the end of each epoch
-                print("Train epoch: {}   [{:.5f} - {:.0f}%]".format(
+                print("Train epoch: {}   [{:.2f} - {:.0f}%]".format(
                     epoch, loss.item(), 100. * batch_id / len(train_loader)),
                     end="\r")
                 
-            # Take average over all samples in the train data
-            epoch_loglik = train_loglik / len(train_loader) 
-            epoch_kl = train_kl / len(train_loader)
-            epoch_out = train_out / len(train_loader)
+            # Take average over all batches in the train data
+            epoch_loss = train_loss / (batch_id + 1)
+            epoch_loglik = train_loglik / (batch_id + 1)
+            epoch_kl = train_kl / (batch_id + 1)
+            epoch_out = train_out / (batch_id + 1)
 
             # Print Message at the end of each epoch with the main loss and all auxiliary loss functions
-            print("Train {} ({:.0f}%):  [loss {:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
+            print("Train {} ({:.0f}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - out {:.2f}]".format(
                 epoch, 100, 
-                train_loss.item(), epoch_loglik.item(), epoch_kl.item(), epoch_out.item()), end="     ")
+                epoch_loss.item(), epoch_loglik.item(), epoch_kl.item(), epoch_out.item()), end="     ")
                 
             
             # Log objects to Weights and Biases
             wandb.log({
                 "train/epoch": epoch + 1,
-                "train/loss": train_loss,
+                "train/loss": epoch_loss,
                 "train/loglik": epoch_loglik,
                 "train/kldiv": epoch_kl,
                 "train/out_l": epoch_out
@@ -471,8 +479,8 @@ class DirVRNN(nn.Module):
                 val_loss, history_objects = self.forward(X, y)
 
                 # Load individual Losses from tracker
-                log_lik = history_objects["loss_loglik"]
-                kl_div = history_objects["loss_kl"]
+                log_lik = torch.sum(history_objects["loss_loglik"])
+                kl_div = torch.sum(history_objects["loss_kl"])
                 out_l = history_objects["loss_out"]
 
                 # Log Losses
@@ -488,12 +496,12 @@ class DirVRNN(nn.Module):
 
 
                 # Print message
-                print("{} ({:.0f}%):  [loss {:.5f} - loglik {:.5f} - kl {:.5f} - out {:.5f}]".format(
+                print("{} ({:.0f}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - out {:.2f}]".format(
                     iter_str, 100, 
                     val_loss.item(), 
-                    torch.sum(log_lik).item(), 
-                    torch.sum(kl_div).item(), 
-                    torch.sum(out_l).item()
+                    log_lik.item(), 
+                    kl_div.item(), 
+                    out_l.item()
                     )
                 )
 
@@ -535,7 +543,8 @@ class DirVRNN(nn.Module):
                         "seed": self.seed,
                     }
 
-                    logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=0, mode="test", class_names=class_names, feat_names=feat_names)
+                    logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=0, mode="test", class_names=class_names, feat_names=feat_names,
+                            save_dir = save_dir)
 
                 # Append Test data
                 history_objects["X_test"] = X

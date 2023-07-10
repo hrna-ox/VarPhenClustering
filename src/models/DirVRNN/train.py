@@ -108,11 +108,11 @@ def main():
 
             
         # Save Model 
-        save_fd = "exps/Dir_VRNN/{}/{}".format(run_config["data_name"], run_config["run_name"])
+        save_fd = "exps/Dir_VRNN/{}/{}/{}".format(run_config["data_name"], run_config["run_name"], fold_key)
         if not os.path.exists(save_fd):
             os.makedirs(save_fd)
             
-        torch.save(model.state_dict(), save_fd + "/model.h5")
+        torch.save(model.state_dict(), save_fd + "/trained_model.h5")
         # wandb.save(save_fd + "/model.h5")
 
 
@@ -120,7 +120,6 @@ def main():
         print("\n\nRunning model on test data...\n\n")
 
         # Run model on test data
-        model.eval()
         log = model.predict(
             x_test, y_test, 
             run_config=run_config, 
@@ -131,7 +130,6 @@ def main():
 
         # Finish recording session and save outputs
         wandb.finish()
-        torch.save(log, save_fd + "/output_dic.h5")
 
 # endregion
 
