@@ -53,16 +53,29 @@ def main():
         K_folds=run_config["K_folds"]
     )
 
-    # Train model on data
-    print("\n\nTraining model\n\n")
-    print("Training with K={} folds".format(run_config["K_folds"]))
 
     # Iterate over folds
     for idx, (fold_key, data_arrs) in enumerate(data_dic["CV_folds"].items()):
 
+        # Print message
+        print("\n\nTraining model on fold {} of {}...\n\n".format(idx+1, run_config["K_folds"]))
+
+        # Extra parameters to pass to fit predict functions for better logging
+        viz_params = {
+            "class_names": data_dic["load_config"]["outcomes"],
+            "feat_names": data_dic["load_config"]["features"],
+            "save_dir": f"exps/DirVRNN/{data_name}/{run_name}/{fold_key}/",
+            "fold": idx+1
+        }
         
         # Initialize WandB Session for logging metrics, results and model weights 
-        save_dir = f"exps/DirVRNN/{data_name}/{run_name}/{fold_key}/"
+        save_dir = f"exps/DirVRNN/{data_name}/{run_name}/{fold_key}"
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+            os.makedirs(f"{save_dir}/train")
+            os.makedirs(f"{save_dir}/test")
+            os.makedirs(f"{save_dir}/val")
+        
         wandb.init(
             name= "{}-{}-{}-{}".format(model_name, data_name, run_name, fold_key),
             entity="hrna-ox", 
@@ -70,9 +83,6 @@ def main():
             project="DirVRNN", 
             config=run_config
         )
-
-        # Print message
-        print("\n\nTraining on fold {} of {}...\n\n".format(idx+1, run_config["K_folds"]))
 
         # Load model
         model = DirVRNN(
@@ -101,19 +111,11 @@ def main():
             lr=run_config["lr"],
             batch_size=run_config["batch_size"],
             num_epochs=run_config["num_epochs"],
-            save_dir=save_dir,
-            class_names=data_dic["load_config"]["outcomes"],
-            feat_names=data_dic["load_config"]["features"],
+            viz_params=viz_params,
         )
 
-            
-        # Save Model 
-        save_fd = "exps/Dir_VRNN/{}/{}/{}".format(run_config["data_name"], run_config["run_name"], fold_key)
-        if not os.path.exists(save_fd):
-            os.makedirs(save_fd)
-            
-        torch.save(model.state_dict(), save_fd + "/trained_model.h5")
-        # wandb.save(save_fd + "/model.h5")
+        # Save Model and Model Weights    
+        torch.save(model.state_dict(), save_dir + "model.h5")
 
 
         # Run on Test data

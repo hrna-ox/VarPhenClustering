@@ -25,7 +25,26 @@ import src.models.losses_and_metrics as LM_utils
 # endregion
 
 # region =============== MAIN ===============
-def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch: int = 0, mode: str = "val", class_names: List = [], feat_names: List = [], save_dir: str = "exps/Dir_VRNN/"):
+def log_scores(X: torch.Tensor, y: torch.Tensor, log: Dict, epoch: int = 1, mode: str = "val"):
+    """
+    Function for logging scores for the model during evaluation
+
+    Args:
+        X (torch.Tensor): _description_
+        y (torch.Tensor): _description_
+        log (Dict): _description_
+        epoch (int, optional): _description_. Defaults to 1.
+        mode (str, optional): _description_. Defaults to "val".
+    """
+
+    # Convert X, y to numpy
+    X_np, y_np = X.detach().numpy(), y.detach().numpy()
+
+    # Expand log dictionary
+    y_pred_np = log["y_preds"].detach().numpy()
+    
+
+def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch: int = 0, mode: str = "val", outcomes: List = [], features: List = [], save_dir: str = "exps/Dir_VRNN/"):
     """
     Logger for the model. 
 
@@ -36,8 +55,8 @@ def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch
     - Log_Dict: dictionary with loss and object information.
     - epoch: current epoch for training. This parameter is disregarded if mode is set to 'test'.
     - mode: str indicating whether the logger is for testing or validation.
-    - class_names: list of class names for the outcome visualization and analysis
-    - feat_names: list of feature names for the input data visualization and analysis
+    - outcomes: list of class names for the outcome visualization and analysis
+    - features: list of feature names for the input data visualization and analysis
     - save_dir: directory to save the plots and metrics.
 
     Returns:

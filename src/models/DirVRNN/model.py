@@ -6,9 +6,14 @@ Model file to define GC-DaPh class.
 """
 
 # ============= IMPORT LIBRARIES ==============
+import csv
+import os
+import pickle
 import torch
 import torch.nn as nn
 import wandb
+
+import time
 
 from typing import Tuple, Dict, Union, List
 from torch.utils.data import DataLoader, TensorDataset
@@ -18,7 +23,7 @@ from src.models.deep_learning_base_classes import MLP, LSTM_Dec_v1, LSTM_Dec_v2
 
 import src.models.DirVRNN.auxiliary_functions as model_utils
 from src.models.DirVRNN.auxiliary_functions import eps
-from src.models.DirVRNN.logger import logger
+import src.models.DirVRNN.logger as logger
 
 
 
@@ -342,14 +347,12 @@ class DirVRNN(nn.Module):
         return (-1) * ELBO, history      # want to maximize loss, so return negative loss
     
     def fit(self, 
-            train_data, val_data=(None, None),
+            train_data, val_data,
             K_fold_idx: int = 1,
             lr: float = 0.001, 
             batch_size: int = 32,
             num_epochs: int = 100,
-            save_dir: Union[str, None] = None,
-            class_names: List = [],
-            feat_names: List = [],
+            viz_params: Dict = {}
         ):
         """
         Method to train model given train and validation data, as well as training parameters.
@@ -361,15 +364,47 @@ class DirVRNN(nn.Module):
             - lr: learning rate for optimizer.
             - batch_size: batch size for training.
             - num_epochs: number of epochs to train for.
-            - save_dir: directory to save model checkpoints. If None, then no checkpoints are saved.
-            - class_names: list of class names for outcome variable.
-            - feat_names: list of feature names for input data.
+            - viz_params: dictionary of parameters for visualization. If None, then some placeholders are passed.
+                - save_dir: directory to save visualization results.
+                - fold: current fold in K-fold cross-validation.
+                - features: list of feature names.
+                - outcomes: list of outcome names.
 
         Outputs:
             - loss: final loss value.
             - history: dictionary with training history, including each loss component.
         """
+        # ================== PARAMETER CHECKING AND SAVE HANDLING ==================
+        # Parse visualization parameters
+        save_dir = viz_params["save_dir"]
 
+        # Create save directory and scores file if it does not exist
+        train_fd = f"{save_dir}/train"
+        val_fd = f"{save_dir}/val"
+
+        with open(f"{train_fd}/train_losses.csv", "w", newline="") as f:
+
+            # Write header
+            writer = csv.writer(f)
+            writer.writerow(["epoch", "loss", "loss_kl", "loss_loglik", "loss_out"])
+
+        with open(f"{val_fd}/val_losses.csv", "w", newline="") as f:
+            
+            # Write header
+            writer = csv.writer(f)
+            writer.writerow(["epoch", "loss", "loss_kl", "loss_loglik", "loss_out"])
+
+        with open(f"{val_fd}/val_scores.csv", "w", newline="") as f:
+            
+            # Write header
+            writer = csv.writer(f)
+            writer.writerow(["epoch", "r2", "mse", "mae"])
+
+
+
+
+
+        # ================== DATA PREPARATION ==================
         # Unpack data and make data loaders
         X_train, y_train = train_data
         X_val, y_val = val_data
@@ -378,7 +413,7 @@ class DirVRNN(nn.Module):
         train_dataset = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-        # Define optimizer and Logging
+        # Define optimizer and Logging of weights
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         wandb.watch(
                 models=self, 
@@ -386,8 +421,10 @@ class DirVRNN(nn.Module):
                 log_freq=1, 
                 idx = K_fold_idx
             )
+        
 
         # ================== TRAINING-VALIDATION LOOP ==================
+        history_objects = {}
         for epoch in range(1, num_epochs + 1):
 
             # Set model to train mode and initialize loss tracker
@@ -436,21 +473,40 @@ class DirVRNN(nn.Module):
                 
             
             # Log objects to Weights and Biases
-            wandb.log({
-                "train/epoch": epoch + 1,
-                "train/loss": epoch_loss,
-                "train/loglik": epoch_loglik,
-                "train/kldiv": epoch_kl,
-                "train/out_l": epoch_out
-            },
-            step=epoch+1
-        )	
-            
-            # Check performance on validation set if exists
-            if X_val is not None and y_val is not None:
-                self.validate(X_val, y_val, epoch=epoch, save_dir=save_dir, class_names=class_names, feat_names=feat_names)
+            wandb.log({"train/epoch": epoch + 1, "train/loss": epoch_loss, "train/loglik": epoch_loglik,
+                "train/kldiv": epoch_kl, "train/out_l": epoch_out
+                }, 
+                step=epoch+1
+            )	
+
+            # Save to CSV file
+            with open(f"{train_fd}/train_losses.csv", "a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([epoch, epoch_loss.item(), epoch_kl.item(), epoch_loglik.item(), epoch_out.item()])
+
     
-    def validate(self, X, y, epoch: int, class_names: List = [], feat_names: List = [], save_dir: Union[str, None] = None):
+            # Check performance on validation set if exists
+            val_loss, outputs_val = self.validate(X_val, y_val, epoch=epoch, viz_params=viz_params)    
+
+        # At the end of training, save the data and the final outputs
+        history_objects["X_train"] = X_train
+        history_objects["y_train"] = y_train    
+        
+        # Save to pickle
+        with open(f"{train_fd}/train_outputs.pkl", "wb") as f:
+            pickle.dump(history_objects, f)
+
+        # Do the same for validation data 
+        outputs_val["X_val"] = X_val
+        outputs_val["y_val"] = y_val
+
+        # Save to pickle
+        with open(f"{val_fd}/val_outputs.pkl", "wb") as f:
+            pickle.dump(outputs_val, f)
+
+
+
+    def validate(self, X, y, epoch: int, viz_params: Dict):
         """
         Compute Performance on Val Dataset.
 
@@ -458,18 +514,31 @@ class DirVRNN(nn.Module):
             - X: input data of shape (bs, T, input_size)
             - y: outcome data of shape (bs, output_size)
             - epoch: int indicating epoch number
-            - class_names: List (optional): list of class names for logging
-            - feat_names: List (optional): list of feature names for logging
-            - save_dir: str (optional): directory to save predictions to
+            - viz_params: dictionary containing visualization parameters for better saving. If None, then standard placeholders are used.
+                - save_dir: directory to save results
+                - fold: fold number
+                - features: list of feature names
+                - outcomes: list of outcome names
         """
+        if X is None or y is None:
+            return None, {}
+
+        # Unpack viz params
+        val_fd = f"{viz_params['save_dir']}/val"
+        fold = viz_params["fold"]
+        features = viz_params["features"]
+        outcomes = viz_params["outcomes"]
+
+
+
 
         # Set model to evaluation mode 
         self.eval()
-        iter_str = f"val {epoch}"
 
         # Prepare Data
         val_data = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
         val_loader = DataLoader(val_data, batch_size=X.shape[0], shuffle=False)
+
 
         # Apply forward prediction
         with torch.inference_mode():
@@ -485,35 +554,41 @@ class DirVRNN(nn.Module):
 
                 # Log Losses
                 wandb.log({
-                    "val/epoch": epoch + 1,
-                    "val/loss": val_loss,
-                    "val/loglik": log_lik,
-                    "val/kldiv": kl_div,
-                    "val/out_l": out_l,
+                    "val/epoch": epoch + 1, "val/loss": val_loss, "val/loglik": log_lik,
+                    "val/kldiv": kl_div, "val/out_l": out_l,
                     },
                     step=epoch+1
                 )
 
 
                 # Print message
-                print("{} ({:.0f}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - out {:.2f}]".format(
-                    iter_str, 100, 
-                    val_loss.item(), 
-                    log_lik.item(), 
-                    kl_div.item(), 
-                    out_l.item()
+                print("Val epoch {} ({:.0f}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - out {:.2f}]".format(
+                    epoch, 100, val_loss.item(), log_lik.item(), 
+                    kl_div.item(), out_l.item()
                     )
                 )
 
-                # Log results
-                if save_dir is not None:
-                    model_params={
-                        "c_means": self.c_means,
-                        "log_c_vars": self.log_c_vars,
-                        "seed": self.seed,
-                    }
+                # Save to CSV file
+                with open(f"{val_fd}/val_losses.csv", "a", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow([epoch, val_loss.item(), kl_div.item(), log_lik.item(), out_l.item()])
 
-                    logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=epoch, mode="val", class_names=class_names, feat_names=feat_names, save_dir=save_dir)
+
+                # Log performance evaluation scores
+                logger.log_scores(X=X, y=y, log=history_objects, epoch=epoch, mode="val")
+
+                # Log more complex results
+                model_params={
+                    "c_means": self.c_means,
+                    "log_c_vars": self.log_c_vars,
+                    "seed": self.seed,
+                }
+
+                logger(model_params=model_params, X=X, y=y, 
+                    log=history_objects, 
+                    epoch=epoch, mode="val", 
+                    outcomes=outcomes, features=features, save_dir=save_dir
+                )
 
                 return val_loss, history_objects
 
