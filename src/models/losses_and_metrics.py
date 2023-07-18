@@ -6,7 +6,7 @@ Defines Loss Functions for the various models.
 """
 
 # ============= Import Libraries =============
-from typing import List
+from typing import List, Union
 from matplotlib import pyplot as plt
 from matplotlib.cm import get_cmap
 
@@ -250,6 +250,126 @@ def precision_score(y_true: np.ndarray, y_pred: np.ndarray):
 
         return precision
 
+def get_roc_auc_score(y_true: np.ndarray, y_pred: np.ndarray):
+    """
+    Compute ROC AUC score between outcomes y_true, and predicted outcomes y_pred.
+
+    Args:
+        y_true (np.ndarray): (N, O) array of one-hot encoded outcomes.
+        y_pred (np.ndarray): (N, O) array of outcome probability predictions.
+
+    Returns:
+        roc_auc (float): scalar ROC AUC score.
+    """
+    
+    # Convert to labels
+    labels_true = np.argmax(y_true, axis=-1).astype(int)
+
+    # Compute Roc per class
+    ovr_roc_scores = metrics.roc_auc_score(labels_true, y_score=y_pred, average=None,
+                            multi_class="ovr")
+    
+    return ovr_roc_scores
+
+def get_torch_pr_auc_score(y_true: torch.Tensor, y_pred: torch.Tensor):
+    """
+    Compute PR AUC score between outcomes y_true, and predicted outcomes y_pred.
+
+    Args:
+        y_true (torch.Tensor): (N, O) array of one-hot encoded outcomes.
+        y_pred (torch.Tensor): (N, O) array of outcome probability predictions.
+
+    Returns:
+        pr_auc (torch.Tensor): (O,) array of PR AUC scores per class.
+    """
+    
+    # Convert to labels
+    labels_true = torch.argmax(y_true, dim=-1)
+
+    # Compute Area under the Curve for the Precision Recall Curve for each class
+    _metric_wrapper  = AveragePrecision(task="multiclass", num_classes = y_true.shape[1], average=None)
+    pr_scores = _metric_wrapper(y_pred, labels_true)
+
+    return pr_scores
+
+
+def get_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray):
+    """
+    Compute confusion matrix between outcomes y_true, and predicted outcomes y_pred.
+
+    Args:
+        y_true (np.ndarray): (N, O) array of one-hot encoded outcomes.
+        y_pred (np.ndarray): (N, O) array of outcome probability predictions.
+
+    Returns:
+        confusion_matrix (np.ndarray): (O, O) confusion matrix.
+    """
+    
+    # Convert to labels
+    labels_pred = np.argmax(y_pred, axis=-1)
+    labels_true = np.argmax(y_true, axis=-1)
+
+    # Initialize confusion matrix to zeros
+    confusion_matrix = np.zeros((y_pred.shape[1], y_true.shape[1]))
+
+    # Loop through each true class and then predicted class
+    for pred_idx in range(y_pred.shape[1]):
+        for true_idx in range(y_true.shape[1]):
+
+            # Compute the number of elements with a given predicted class and a given true class
+            confusion_matrix[true_idx, pred_idx] = np.sum(
+                                            (labels_pred == pred_idx) &
+                                            (labels_true == true_idx)
+                                        )
+
+    return confusion_matrix
+
+    
+def get_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: Union[np.ndarray, torch.Tensor]):
+    """
+    Compute all supervised scores between true outcomes y_true, and predicted values y_pred.    
+    """
+
+    # Convert arrays, if needed
+    if isinstance(y_true, torch.Tensor) and isinstance(y_pred, torch.Tensor):
+        y_true_npy, y_pred_npy = y_true.detach().numpy(), y_pred.detach().numpy()
+        y_true_torch, y_pred_torch = y_true, y_pred
+    
+    elif isinstance(y_true, np.ndarray) and isinstance(y_pred, np.ndarray):
+        y_true_npy, y_pred_npy = y_true, y_pred
+        y_true_torch, y_pred_torch = torch.from_numpy(y_true), torch.from_numpy(y_pred)
+
+    else:
+        raise ValueError("y_true and y_pred must both be either np.ndarray or torch.Tensor")
+
+
+    # Compute scores for confusion matrix
+    acc = accuracy_score(y_true_npy, y_pred_npy)
+    macro_f1 = macro_f1_score(y_true_npy, y_pred_npy)
+    micro_f1 = micro_f1_score(y_true_npy, y_pred_npy)
+    recall = recall_score(y_true_npy, y_pred_npy)
+    precision = precision_score(y_true_npy, y_pred_npy)
+
+    # Compute Roc and PR AUC scores
+    roc_auc = get_roc_auc_score(y_true_npy, y_pred_npy)
+    pr_auc = get_torch_pr_auc_score(y_true_torch, y_pred_torch).numpy()
+
+    # Compute Confusion Matrix
+    conf_matrix = get_confusion_matrix(y_true_npy, y_pred_npy)
+
+    # Return dictionary of scores
+    return {
+        "acc": acc,
+        "macro_f1": macro_f1,
+        "micro_f1": micro_f1,
+        "recall": recall,
+        "precision": precision,
+        "roc_auc": roc_auc,
+        "pr_auc": pr_auc,
+        "conf_matrix": conf_matrix
+    }
+
+
 def get_clustering_label_metrics(y_true: np.ndarray, clus_pred: np.ndarray):
     """
     Compute various clustering metrics comparing the predicted clustering with the true labels. 
@@ -333,83 +453,19 @@ def compute_unsupervised_metrics(X: np.ndarray, clus_pred: np.ndarray, seed: int
 
     return {"sil": sil_scores, "dbi": dbi_scores, "vri": vri_scores}
 
-
-def get_roc_auc_score(y_true: np.ndarray, y_pred: np.ndarray):
+def get_clust_scores(y_true: np.ndarray, clus_pred: np.ndarray, X: np.ndarray, seed: int = 0):
     """
-    Compute ROC AUC score between outcomes y_true, and predicted outcomes y_pred.
+    Compute various metrics related to evaluating clustering performance.
 
     Args:
-        y_true (np.ndarray): (N, O) array of one-hot encoded outcomes.
-        y_pred (np.ndarray): (N, O) array of outcome probability predictions.
-
-    Returns:
-        roc_auc (float): scalar ROC AUC score.
+        y_true (np.ndarray): True labels of shape (N, O)
+        clus_pred (np.ndarray): Cluster probability predictions of shape (N, T, K)
+        X (np.ndarray): Data matrix of shape (N, T, D)
+        seed (int): Random State parameter for Silhouette Coefficient Computation.
     """
-    
-    # Convert to labels
-    labels_true = np.argmax(y_true, axis=-1).astype(int)
-
-    # Compute Roc per class
-    ovr_roc_scores = metrics.roc_auc_score(labels_true, y_score=y_pred, average=None,
-                            multi_class="ovr")
-    
-    return ovr_roc_scores
-
-def get_torch_pr_auc_score(y_true: torch.Tensor, y_pred: torch.Tensor):
-    """
-    Compute PR AUC score between outcomes y_true, and predicted outcomes y_pred.
-
-    Args:
-        y_true (torch.Tensor): (N, O) array of one-hot encoded outcomes.
-        y_pred (torch.Tensor): (N, O) array of outcome probability predictions.
-
-    Returns:
-        pr_auc (torch.Tensor): (O,) array of PR AUC scores per class.
-    """
-    
-    # Convert to labels
-    labels_true = torch.argmax(y_true, dim=-1)
-
-    # Compute Area under the Curve for the Precision Recall Curve for each class
-    _metric_wrapper  = AveragePrecision(task="multiclass", num_classes = y_true.shape[1], average=None)
-    pr_scores = _metric_wrapper(y_pred, labels_true)
-
-    return pr_scores
-
-def get_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray):
-    """
-    Compute confusion matrix between outcomes y_true, and predicted outcomes y_pred.
-
-    Args:
-        y_true (np.ndarray): (N, O) array of one-hot encoded outcomes.
-        y_pred (np.ndarray): (N, O) array of outcome probability predictions.
-
-    Returns:
-        confusion_matrix (np.ndarray): (O, O) confusion matrix.
-    """
-    
-    # Convert to labels
-    labels_pred = np.argmax(y_pred, axis=-1)
-    labels_true = np.argmax(y_true, axis=-1)
-
-    # Initialize confusion matrix to zeros
-    confusion_matrix = np.zeros((y_pred.shape[1], y_true.shape[1]))
-
-    # Loop through each true class and then predicted class
-    for pred_idx in range(y_pred.shape[1]):
-        for true_idx in range(y_true.shape[1]):
-
-            # Compute the number of elements with a given predicted class and a given true class
-            confusion_matrix[true_idx, pred_idx] = np.sum(
-                                            (labels_pred == pred_idx) &
-                                            (labels_true == true_idx)
-                                        )
-
-    return confusion_matrix
-
 def get_roc_curve(y_true: np.ndarray, y_pred: np.ndarray, class_names: List[str] = []):
     """
-    Compute ROC curve between outcomes y_true, and predicted outcomes y_pred.
+    Compute ROC curve between outcomes y_true, and predicted outcomes y_pred.s
 
     Returns:
     - fig, ax pair of plt objects with the roc curves. Includes roc curve per each class.

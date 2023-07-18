@@ -394,14 +394,6 @@ class DirVRNN(nn.Module):
             writer = csv.writer(f)
             writer.writerow(["epoch", "loss", "loss_kl", "loss_loglik", "loss_out"])
 
-        with open(f"{val_fd}/val_scores.csv", "w", newline="") as f:
-            
-            # Write header
-            writer = csv.writer(f)
-            writer.writerow(["epoch", "r2", "mse", "mae"])
-
-
-
 
 
         # ================== DATA PREPARATION ==================
@@ -525,7 +517,6 @@ class DirVRNN(nn.Module):
 
         # Unpack viz params
         val_fd = f"{viz_params['save_dir']}/val"
-        fold = viz_params["fold"]
         features = viz_params["features"]
         outcomes = viz_params["outcomes"]
 
@@ -575,7 +566,7 @@ class DirVRNN(nn.Module):
 
 
                 # Log performance evaluation scores
-                logger.log_scores(X=X, y=y, log=history_objects, epoch=epoch, mode="val")
+                logger.logger_sup_scores(y_true=y, y_pred=history_objects["y_pred"],save_dir=val_fd, epoch=epoch, class_names=outcomes)
 
                 # Log more complex results
                 model_params={
@@ -584,11 +575,11 @@ class DirVRNN(nn.Module):
                     "seed": self.seed,
                 }
 
-                logger(model_params=model_params, X=X, y=y, 
-                    log=history_objects, 
-                    epoch=epoch, mode="val", 
-                    outcomes=outcomes, features=features, save_dir=save_dir
-                )
+                # logger(model_params=model_params, X=X, y=y, 
+                #    log=history_objects, 
+                #    epoch=epoch, mode="val", 
+                #    outcomes=outcomes, features=features, save_dir=save_dir
+                # )
 
                 return val_loss, history_objects
 

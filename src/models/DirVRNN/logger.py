@@ -8,13 +8,15 @@ This file implements a logger function to plot and log useful information about 
 """
 
 # region =============== IMPORT LIBRARIES ===============
+import csv
+import itertools
 import os
 import pickle
 import numpy as np
 import pandas as pd
 import torch
 
-from typing import Dict, List
+from typing import Dict, List, Union
 
 import matplotlib.pyplot as plt
 import wandb
@@ -24,24 +26,73 @@ import src.models.losses_and_metrics as LM_utils
 
 # endregion
 
-# region =============== MAIN ===============
-def log_scores(X: torch.Tensor, y: torch.Tensor, log: Dict, epoch: int = 1, mode: str = "val"):
+# ==================== UTILITY FUNCTION ====================
+def _logger_make_if_not_exist(save_path: str, header: List = [], objects: List = []):
     """
-    Function for logging scores for the model during evaluation
+    Create a csv file if it does not exist, and append the header. If file exists, append objects.
 
     Args:
-        X (torch.Tensor): _description_
-        y (torch.Tensor): _description_
-        log (Dict): _description_
-        epoch (int, optional): _description_. Defaults to 1.
-        mode (str, optional): _description_. Defaults to "val".
+    - save_path: path to save the csv file
+    - header: list of strings to append to the header
+    - objects: list of objects to append to the csv file
     """
+    if not os.path.exists(save_path):
+        with open(save_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+        
+    else:
+        with open(save_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(objects)
 
-    # Convert X, y to numpy
-    X_np, y_np = X.detach().numpy(), y.detach().numpy()
+# region =============== MAIN ===============
+def logger_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: Union[np.ndarray, torch.Tensor], 
+                    save_dir: str = "exps/DirVRNN", epoch: int = 1, class_names: List = []):
+    """
+    Log the Supervised Scores Performance into save directory.
 
-    # Expand log dictionary
-    y_pred_np = log["y_preds"].detach().numpy()
+    Args:
+    - y_true: true labels of shape (bs, output_size)
+    - y_pred: predicted labels of shape (bs, output_size)
+    - save_dir: directory to save the scores (individual, and per class)
+    - epoch: current epoch for training. For testing, it is set to 1.
+    - class_names: list of class names for the outcome visualization and analysis
+    """
+    if save_dir is not None:
+        assert os.path.exists(save_dir)
+
+    if class_names == []:
+        class_names = [f"C{i}" for i in range(y_true.shape[1])]
+
+    # Compute Supervised Scores
+    scores = LM_utils.get_sup_scores(y_true=y_true, y_pred=y_pred)
+
+    # Unpack Dictionary
+    acc, macro_f1, micro_f1, recall, precision = scores["acc"], scores["macro_f1"], scores["micro_f1"], scores["recall"], scores["precision"]
+    roc_auc, pr_auc = scores["roc_auc"], scores["pr_auc"]
+    conf_mat = scores["conf_matrix"]
+
+    # Save to file using csv writer
+    _logger_make_if_not_exist(save_path=os.path.join(save_dir, "sup_scores.csv"), 
+                            header=["epoch", "acc", "macro_f1", "micro_f1", "recall", "precision"], 
+                            objects=[epoch, acc, macro_f1, micro_f1, recall, precision])
+
+    # Save ROC and PR Scores per class
+    header = ["epoch"] + [f"ROC_{_cl}" for _cl in class_names] + [f"PR_{_cl}" for _cl in class_names]
+    _logger_make_if_not_exist(save_path=os.path.join(save_dir, "auc_scores.csv"),
+                            header = header,
+                            objects = [epoch, *roc_auc, *pr_auc])
+
+
+    # Save Confusion Matrix
+    header = ["epoch"]
+    for true_cl, pred_cl in itertools.product(class_names, repeat=2):      # Iterate over pairs of class names, ordered by the first
+        header.append(f"T{true_cl}-F{pred_cl}")
+    
+    _logger_make_if_not_exist(save_path=os.path.join(save_dir, "confusion_matrix.csv"),
+                            header = header,
+                            objects = [epoch, *conf_mat.reshape(-1)])
     
 
 def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch: int = 0, mode: str = "val", outcomes: List = [], features: List = [], save_dir: str = "exps/Dir_VRNN/"):
@@ -95,25 +146,6 @@ def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch
     clus_prob = temp_pis.detach().numpy()
     X_npy = X.detach().numpy()
     class_names = [f"Class {i}" for i in range(y_pred.shape[-1])]
-
-    # Compute accuracy, f1 and recall scores
-    acc = LM_utils.accuracy_score(y_true=y_npy, y_pred=y_pred_npy)
-    
-    macro_f1 = LM_utils.macro_f1_score(y_true=y_npy, y_pred=y_pred_npy)
-    micro_f1 = LM_utils.micro_f1_score(y_true=y_npy, y_pred=y_pred_npy)
-    recall = LM_utils.recall_score(y_true=y_npy, y_pred=y_pred_npy)
-    precision = LM_utils.precision_score(y_true=y_npy, y_pred=y_pred_npy)
-
-    # Log performance scores
-    wandb.log({
-        f"{mode}/accuracy": acc,
-        f"{mode}/macro_f1": macro_f1,
-        f"{mode}/micro_f1": micro_f1,
-        f"{mode}/recall": recall,
-        f"{mode}/precision": precision
-        },
-        step=epoch+1
-    )
 
     # Compute Data Clustering Metrics
     label_metrics = LM_utils.get_clustering_label_metrics(y_true=y_npy, clus_pred=clus_prob)
