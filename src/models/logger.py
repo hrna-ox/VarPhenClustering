@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import wandb
 
 import src.models.DirVRNN.auxiliary_functions as model_utils
-import src.models.losses_and_metrics as LM_utils
+import src.models.loss_functions as LM_utils
 
 # endregion
 

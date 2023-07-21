@@ -18,7 +18,7 @@ import time
 from typing import Tuple, Dict, Union, List
 from torch.utils.data import DataLoader, TensorDataset
 
-import src.models.losses_and_metrics as LM_utils
+import src.models.loss_functions as LM_utils
 from src.models.deep_learning_base_classes import MLP, LSTM_Dec_v1, LSTM_Dec_v2
 
 import src.models.DirVRNN.auxiliary_functions as model_utils
@@ -567,6 +567,9 @@ class DirVRNN(nn.Module):
 
                 # Log performance evaluation scores
                 logger.logger_sup_scores(y_true=y, y_pred=history_objects["y_pred"],save_dir=val_fd, epoch=epoch, class_names=outcomes)
+
+                # Log clustering evaluation scores
+                
 
                 # Log more complex results
                 model_params={

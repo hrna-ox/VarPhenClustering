@@ -2,13 +2,11 @@
 Author: Henrique Aguiar
 Contact: henrique.aguiar@eng.ox.ac.uk
 
-Defines Loss Functions for the various models.
+Define Metric computations for the various models
 """
 
 # ============= Import Libraries =============
-from typing import List, Union
-from matplotlib import pyplot as plt
-from matplotlib.cm import get_cmap
+from typing import Union
 
 import torch
 from torchmetrics import AveragePrecision
@@ -18,85 +16,6 @@ import sklearn.metrics as metrics
 
 eps = 1e-8
 
-# region =============== Loss Functions ===============
-
-def torch_log_gaussian_lik(x, mu, var, device=None):
-    """
-    Log Likelihood for values x given multivariate normal with mean mu, and variances var.
-    
-    Params:
-    - x: of shape (batch_size, input_size)
-    - mu, var: of shape (input_size)
-    - device: torch.device object (default None)
-
-    Outputs:
-    single values log likelihood for each sample in batch (batch_size)
-    """
-
-    # Get parameters
-    _ , inp_size = x.size()
-
-    # Compute exponential term
-    exp_term =  0.5 * torch.sum(((x - mu) / var) * (x - mu), dim=-1)   # type: ignore # (batch_size)
-    lin_term = torch.sum(torch.log(var), dim=-1, keepdim=False)   # (batch_size)
-    cons_term = 0.5 * inp_size * torch.log(2 * torch.acos(torch.zeros(1)) * 2).to(device=device) # constant
-
-    # Compute log likelihood
-    log_lik = - cons_term - lin_term - exp_term
-
-    return log_lik
-
-
-def dir_kl_div(a1, a2):
-    """
-    Computes KL divergence of dirichlet distributions with parameters a1 and a2
-
-    Inputs: a1, a2 array-like of shape (batch_size, K)
-
-    Outputs: array of shape (batch_size) with corresponding KL divergence.
-    """
-
-    # Useful pre-computations
-    a1_sum = a1.sum(dim=-1, keepdim=True)
-    a2_sum = a2.sum(dim=-1, keepdim=True)
-
-    # Compute log of gamma functions
-    lgamma1, lgamma2 = torch.lgamma(a1), torch.lgamma(a2)
-    lgamma1_sum, lgamma2_sum = torch.lgamma(a1_sum), torch.lgamma(a2_sum)
-
-    # Compute digamma function for a1 and a1_sum
-    digamma_1, digamma1_sum = torch.digamma(a1), torch.digamma(a1_sum)
-
-    # Compute individual terms of lemma in paper
-    term1 = lgamma1_sum - lgamma2_sum
-    term2 = torch.sum(lgamma1 - lgamma2, dim=-1, keepdim=False)
-    term3 = torch.sum((a1 - a2) * (digamma_1 - digamma1_sum), dim=-1, keepdim=False)
-    
-    # Combine all terms
-    kl_div = torch.squeeze(term1) + term2 + term3
-
-    return kl_div
-
-
-def cat_cross_entropy(y_true, y_pred):
-    """
-    Compute categorical cross-entropy between y_true and y_pred. Assumes y_true is one-hot encoded.
-
-    Parameters:
-        - y_true: one-hot encoded of shape (batch_size, num_outcomes)
-        - y_pred: of shape (batch_size, num_outcomes)
-
-    Outputs:
-        - categorical distribution loss for each sample in batch (batch_size)
-    """
-
-    cat_ce = - torch.sum(y_true * torch.log(y_pred + 1e-8), dim=-1)
-
-    return cat_ce
-
-# endregion
-
-# region ============== Metrics ==============
 
 def accuracy_score(y_true: np.ndarray, y_pred: np.ndarray):
     """
@@ -453,7 +372,7 @@ def compute_unsupervised_metrics(X: np.ndarray, clus_pred: np.ndarray, seed: int
 
     return {"sil": sil_scores, "dbi": dbi_scores, "vri": vri_scores}
 
-def get_clust_scores(y_true: np.ndarray, clus_pred: np.ndarray, X: np.ndarray, seed: int = 0):
+def get_clust_scores(y_true: Union[], clus_pred: np.ndarray, X: np.ndarray, seed: int = 0):
     """
     Compute various metrics related to evaluating clustering performance.
 
@@ -463,98 +382,15 @@ def get_clust_scores(y_true: np.ndarray, clus_pred: np.ndarray, X: np.ndarray, s
         X (np.ndarray): Data matrix of shape (N, T, D)
         seed (int): Random State parameter for Silhouette Coefficient Computation.
     """
-def get_roc_curve(y_true: np.ndarray, y_pred: np.ndarray, class_names: List[str] = []):
-    """
-    Compute ROC curve between outcomes y_true, and predicted outcomes y_pred.s
+    # Convert arrays, if needed
+    if isinstance(y_true, torch.Tensor) and isinstance(clus_pred, torch.Tensor):
+        y_true_npy, clus_pred_npy = y_true.detach().numpy(), clus_pred.detach().numpy()
+        y_true_torch, y_pred_torch = y_true, clus_pred
+    
+    elif isinstance(y_true, np.ndarray) and isinstance(clus_pred, np.ndarray):
+        y_true_npy, clus_pred_npy = y_true, clus_pred
+        y_true_torch, clus_pred_torch = torch.from_numpy(y_true), torch.from_numpy(clus_pred)
 
-    Returns:
-    - fig, ax pair of plt objects with the roc curves. Includes roc curve per each class.
-    """
-
-    # If class_names are empty then generate some placeholder names
-    num_classes = y_true.shape[1]
-    if class_names == []:
-        class_names = [f"Class {i}" for i in range(num_classes)]
-    roc_scores = get_roc_auc_score(y_true, y_pred)
-
-    # Initialize figure
-    fig, ax = plt.subplots(figsize=(10, 10))
-    colors = get_cmap("tab10").colors # type: ignore
-
-    # Iterate through each class
-    for class_idx in range(num_classes):
-
-        # Class true and predicted values
-        y_true_class = y_true[:, class_idx]
-        y_pred_class = y_pred[:, class_idx]
-
-        # roc, auc values for this class
-        auc = roc_scores[class_idx]# type: ignore
-
-        # Compute ROC Curve
-        metrics.RocCurveDisplay.from_predictions(
-            y_true=y_true_class, y_pred=y_pred_class, 
-            color=colors[class_idx], plot_chance_level=(class_idx==0),
-            ax=ax, name=f"Class {class_idx} (AUC {auc:.2f}))", 
-        )
-        
-    ax.set_title("ROC Curves")
-    ax.set_xlabel("False Positive Rate")
-    ax.set_ylabel("True Positive Rate")
-
-    fig.legend()
-
-    # Close all open figures
-    plt.close()
-
-    return fig, ax
-
-
-def get_torch_pr_curve(y_true: torch.Tensor, y_pred: torch.Tensor, class_names: List[str] = []):
-    """
-    Compute PR curve between outcomes y_true, and predicted outcomes y_pred.
-
-    Returns:
-    - fig, ax pair of plt objects with the roc curves. Includes roc curve per each class.
-    """
-
-    # If class_names are empty then generate some placeholder names
-    num_classes = y_true.shape[1]
-    if class_names == []:
-        class_names = [f"Class {i}" for i in range(num_classes)]
-    pr_scores = get_torch_pr_auc_score(y_true, y_pred).detach().numpy()
-
-    # Initialize figure 
-    fig, ax = plt.subplots(figsize=(10, 10))
-    colors = get_cmap("tab10").colors # type: ignore
-
-    # Iterate through each class
-    for class_idx in range(num_classes):
-
-        # Class true and predicted values
-        y_true_class = y_true[:, class_idx]
-        y_pred_class = y_pred[:, class_idx]
-
-        # roc, auc values for this class
-        prc = pr_scores[class_idx] # type: ignore
-
-        # Compute ROC Curve
-        metrics.PrecisionRecallDisplay.from_predictions(
-            y_true=y_true_class, y_pred=y_pred_class, 
-            color=colors[class_idx], plot_chance_level=True,
-            ax=ax, name=f"Class {class_idx} (PR {prc:.2f}))", 
-        )
-        
-    ax.set_title("PR Curves")
-    ax.set_xlabel("Recall")
-    ax.set_ylabel("Precision")
-
-    fig.legend()
-    # Close all open figures
-    plt.close()
-
-    return fig, ax
-
-
-
-# endregion
+    else:
+        raise ValueError("y_true and y_pred must both be either np.ndarray or torch.Tensor")
+    
