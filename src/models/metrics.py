@@ -6,7 +6,7 @@ Define Metric computations for the various models
 """
 
 # ============= Import Libraries =============
-from typing import Union
+from typing import Union, List, Tuple
 
 import torch
 from torchmetrics import AveragePrecision
@@ -17,7 +17,20 @@ import sklearn.metrics as metrics
 eps = 1e-8
 
 
-def accuracy_score(y_true: np.ndarray, y_pred: np.ndarray):
+def _convert_to_labels(*args):
+    """
+    Iteratively convert predictions/one-hot encoded outcomes to labels.
+    """
+
+    for arg in args:
+
+        if arg.ndim == 1:           # Argument already is converted to labels
+            yield arg.astype(int)
+        elif arg.ndim >= 2:
+            yield np.argmax(arg, axis=-1).astype(int)
+
+
+def accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """
     Compute accuracy score between outcomes y_true, and predicted outcomes y_pred.
 
@@ -30,8 +43,7 @@ def accuracy_score(y_true: np.ndarray, y_pred: np.ndarray):
     """
 
     # Convert to labels
-    labels_pred = np.argmax(y_pred, axis=-1)
-    labels_true = np.argmax(y_true, axis=-1)
+    labels_pred, labels_true = _convert_to_labels(y_pred, y_true)
 
     # Compare pairwise and sum across tensor
     correct_pred = np.sum(labels_pred == labels_true)
@@ -42,83 +54,53 @@ def accuracy_score(y_true: np.ndarray, y_pred: np.ndarray):
 
     return acc
 
-def macro_f1_score(y_true: np.ndarray, y_pred: np.ndarray):
-    """
-    Compute Macro Multi-Class F1 score between true outcomes y_true, and predicted values y_pred.
 
-    Params:
-    - y_true: (N, O) array of one-hot encoded outcomes.
-    - y_pred: (N, O) array of outcome probability predictions.
+def get_true_false_pos_neg(label_true: np.ndarray, label_pred: np.ndarray) -> Tuple[int, int, int, int]:
+    """
+    Compute TP, FP, FN, TN between predicted true label label_true, and predicted label label_pred.
+    
+    Args:
+        label_true (_type_): (N, ) array of true labels in [0, 1]
+        label_pred (_type_): (N, ) array of predicted labels in [0,1]
 
     Returns:
-    - f1_score: scalar F1 score.
+        TP, FP, FN, TN (_type_): scalar recall score.
     """
+    
+    # Compute TP, FP, FN
+    TP = int(np.sum((label_pred == label_true) & (label_true == 1)))
+    FP = int(np.sum((label_pred != label_true) & (label_true == 0)))
+    FN = int(np.sum((label_pred != label_true) & (label_true == 1)))
+    TN = int(np.sum((label_pred == label_true) & (label_true == 0)))
 
-    # Convert to labels
-    labels_pred = np.argmax(y_pred, axis=-1)
-    labels_true = np.argmax(y_true, axis=-1)
+    return TP, FP, FN, TN
 
-    # Initialize tracker of f1 score
-    f1_scores = []
 
-    # Loop through each class
-    for class_idx in range(y_true.shape[1]):
-
-        # Compute True Positives, False Positives and False Negatives
-        tp = np.sum((labels_pred == class_idx) & (labels_true == class_idx))
-        fp = np.sum((labels_pred == class_idx) & (labels_true != class_idx))
-        fn = np.sum((labels_pred != class_idx) & (labels_true == class_idx))
-
-        # Compute precision and recall while disregarding any potential issues with division by zero
-        with np.errstate(divide='ignore', invalid='ignore'):
-
-            precision = np.divide(tp, tp + fp)
-            recall = np.divide(tp, tp + fn)
-
-            # Compute F1 score and append
-            f1 = 2 * np.divide(precision * recall, precision + recall + eps)
-            f1_scores.append(f1)
-
-    return np.mean(f1_scores)
-
-def micro_f1_score(y_true: np.ndarray, y_pred: np.ndarray):
+def recall_binary(label_true: np.ndarray, label_pred: np.ndarray) -> float:
     """
-    Compute Micro Multi-Class F1 score between true outcomes y_true, and predicted values y_pred.
-
-    Params:
-    - y_true: (N, O) array of one-hot encoded outcomes.
-    - y_pred: (N, O) array of outcome probability predictions.
+    Compute Recall score between predicted true label label_true, and predicted label label_pred.
+    
+    Args:
+        label_true (_type_): (N, ) array of true labels in [0, 1]
+        label_pred (_type_): (N, ) array of predicted labels in [0,1]
 
     Returns:
-    - f1_score: scalar F1 score.
+        recall (_type_): scalar recall score.
     """
+    
+    # Compute TP, FP, FN
+    TP, _, FN, _ = get_true_false_pos_neg(label_true, label_pred)
 
-    # Convert to labels
-    labels_pred = np.argmax(y_pred, axis=-1)
-    labels_true = np.argmax(y_true, axis=-1)
+    # Compute recall
+    if TP + FN == 0:
+        recall = 0
+    else:
+        recall = TP / (TP + FN)
 
-    # Initialize trackers
-    total_tp, total_fp, total_fn = 0, 0, 0
+    return recall
 
-    # Loop through each class
-    for class_idx in range(y_true.shape[1]):
 
-        # Compute True Positives, False Positives and False Negatives
-        tp = np.sum((labels_pred == class_idx) & (labels_true == class_idx))
-        fp = np.sum((labels_pred == class_idx) & (labels_true != class_idx))
-        fn = np.sum((labels_pred != class_idx) & (labels_true == class_idx))
-
-        # Add to global values
-        total_tp += tp
-        total_fp += fp
-        total_fn += fn
-
-    # Compute f1 score
-    f1 = 2 * np.divide(total_tp, 2 * total_tp + total_fp + total_fn)
-
-    return f1
-
-def recall_score(y_true: np.ndarray, y_pred: np.ndarray):
+def recall_multiclass(y_true: np.ndarray, y_pred: np.ndarray) -> List[float]:
     """
     Compute recall score between outcomes y_true, and predicted outcomes y_pred.
 
@@ -129,21 +111,52 @@ def recall_score(y_true: np.ndarray, y_pred: np.ndarray):
     Returns:
         recall (_type_): scalar recall score.
     """
-    
+
     # Convert to labels
-    labels_pred = np.argmax(y_pred, axis=-1)
-    labels_true = np.argmax(y_true, axis=-1)
+    labels_pred, labels_true = _convert_to_labels(y_pred, y_true)
 
-    # Compute TP, FP, FN
-    TP = np.sum((labels_pred == labels_true) & (labels_true == 1))
-    FN = np.sum((labels_pred != labels_true) & (labels_true == 1))
+    # Initialize tracker of recall scores
+    recall_scores = []
 
-    # Compute recall
-    recall = TP / (TP + FN)
+    # Loop through each class
+    for class_idx in range(y_true.shape[1]):
 
-    return recall
+        # make estimates for each class
+        class_pred = labels_pred == class_idx
+        class_true = labels_true == class_idx
 
-def precision_score(y_true: np.ndarray, y_pred: np.ndarray):
+        # Get score
+        recall = recall_binary(class_true, class_pred)
+        recall_scores.append(recall)
+
+    return recall_scores
+
+
+def precision_binary(label_true: np.ndarray, label_pred: np.ndarray) -> float:
+    """
+    Compute Precision score between predicted true label label_true, and predicted label label_pred.
+    
+    Args:
+        label_true (_type_): (N, ) array of true labels in [0, 1]
+        label_pred (_type_): (N, ) array of predicted labels in [0,1]
+
+    Returns:
+        precision (_type_): scalar precision score.
+    """
+    
+    # Get TP, FP, FN
+    TP, FP, _, _ = get_true_false_pos_neg(label_true, label_pred)
+
+    # Compute precision
+    if TP + FP == 0:
+        precision = 0
+    else:
+        precision = TP / (TP + FP)
+
+    return precision
+
+
+def precision_multiclass(y_true: np.ndarray, y_pred: np.ndarray) -> List:
     """
     Compute precision score between outcomes y_true, and predicted outcomes y_pred.
 
@@ -159,17 +172,103 @@ def precision_score(y_true: np.ndarray, y_pred: np.ndarray):
     labels_pred = np.argmax(y_pred, axis=-1)
     labels_true = np.argmax(y_true, axis=-1)
 
-    # Compute TP, FP, FN
-    TP = np.sum((labels_pred == labels_true) & (labels_true == 1))
-    FP = np.sum((labels_pred != labels_true) & (labels_true == 0))
+    # Initialize tracker of precision scores
+    precision_scores = []
 
-    # Compute precision
-    with np.errstate(divide='ignore', invalid='ignore'):
-        precision = TP / (TP + FP)
+    # Loop through each class
+    for class_idx in range(y_true.shape[1]):
 
-        return precision
+        # make estimates for each class
+        class_pred = labels_pred == class_idx
+        class_true = labels_true == class_idx
 
-def get_roc_auc_score(y_true: np.ndarray, y_pred: np.ndarray):
+        # Get score
+        precision = precision_binary(class_true, class_pred)
+        precision_scores.append(precision)
+
+    return precision_scores
+
+
+def macro_f1(y_true: np.ndarray, y_pred: np.ndarray) -> List:
+    """
+    Compute Macro Multi-Class F1 score between true outcomes y_true, and predicted values y_pred.
+
+    Params:
+    - y_true: (N, O) array of one-hot encoded outcomes.
+    - y_pred: (N, O) array of outcome probability predictions.
+
+    Returns:
+    - f1_score: macro F1 score (F1 score per class)
+    """
+
+    # Convert to labels
+    labels_pred, labels_true = _convert_to_labels(y_pred, y_true)
+
+    # Initialize tracker of f1 score
+    f1_scores = []
+
+    # Loop through each class
+    for class_idx in range(y_true.shape[1]):
+
+        # Compute prediction for the class
+        class_pred = labels_pred == class_idx
+        class_true = labels_true == class_idx
+
+        # Get Recall and Precision
+        recall = recall_binary(class_true, class_pred)
+        precision = precision_binary(class_true, class_pred)
+
+        # Compute F1 score and append
+        if precision + recall == 0:
+            f1 = 0
+        else:
+            f1 = 2 * np.divide(precision * recall, precision + recall)
+        
+        f1_scores.append(f1)
+
+    return f1_scores
+
+
+def micro_f1(y_true: np.ndarray, y_pred: np.ndarray) -> Union[np.floating, float]:
+    """
+    Compute Micro Multi-Class F1 score between true outcomes y_true, and predicted values y_pred.
+
+    Params:
+    - y_true: (N, O) array of one-hot encoded outcomes.
+    - y_pred: (N, O) array of outcome probability predictions.
+
+    Returns:
+    - f1_score: scalar F1 score.
+    """
+
+    # Convert to labels
+    labels_pred, labels_true = _convert_to_labels(y_pred, y_true)
+
+    # Initialize trackers
+    total_tp, total_fp, total_fn = 0, 0, 0
+
+    # Loop through each class
+    for class_idx in range(y_true.shape[1]):
+
+        # Get class specific predictions
+        class_pred = labels_pred == class_idx
+        class_true = labels_true == class_idx
+
+        # Compute True Positives, False Positives and False Negatives
+        tp, fp, fn, _ = get_true_false_pos_neg(class_true, class_pred)
+
+        # Add to global values
+        total_tp += tp
+        total_fp += fp
+        total_fn += fn
+
+    # Compute f1 score - alternative formula
+    f1 = 2 * np.divide(total_tp, 2 * total_tp + total_fp + total_fn)
+
+    return f1
+
+
+def auroc(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
     """
     Compute ROC AUC score between outcomes y_true, and predicted outcomes y_pred.
 
@@ -190,7 +289,8 @@ def get_roc_auc_score(y_true: np.ndarray, y_pred: np.ndarray):
     
     return ovr_roc_scores
 
-def get_torch_pr_auc_score(y_true: torch.Tensor, y_pred: torch.Tensor):
+
+def get_torch_pr_auc_score(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
     """
     Compute PR AUC score between outcomes y_true, and predicted outcomes y_pred.
 
@@ -393,4 +493,96 @@ def get_clust_scores(y_true: Union[], clus_pred: np.ndarray, X: np.ndarray, seed
 
     else:
         raise ValueError("y_true and y_pred must both be either np.ndarray or torch.Tensor")
-    
+
+
+def get_roc_curve(y_true: np.ndarray, y_pred: np.ndarray, class_names: List[str] = []):
+    """
+    Compute ROC curve between outcomes y_true, and predicted outcomes y_pred.s
+
+    Returns:
+    - fig, ax pair of plt objects with the roc curves. Includes roc curve per each class.
+    """
+
+    # If class_names are empty then generate some placeholder names
+    num_classes = y_true.shape[1]
+    if class_names == []:
+        class_names = [f"Class {i}" for i in range(num_classes)]
+    roc_scores = get_roc_auc_score(y_true, y_pred)
+
+    # Initialize figure
+    fig, ax = plt.subplots(figsize=(10, 10))
+    colors = get_cmap("tab10").colors # type: ignore
+
+    # Iterate through each class
+    for class_idx in range(num_classes):
+
+        # Class true and predicted values
+        y_true_class = y_true[:, class_idx]
+        y_pred_class = y_pred[:, class_idx]
+
+        # roc, auc values for this class
+        auc = roc_scores[class_idx]# type: ignore
+
+        # Compute ROC Curve
+        metrics.RocCurveDisplay.from_predictions(
+            y_true=y_true_class, y_pred=y_pred_class, 
+            color=colors[class_idx], plot_chance_level=(class_idx==0),
+            ax=ax, name=f"Class {class_idx} (AUC {auc:.2f}))", 
+        )
+        
+    ax.set_title("ROC Curves")
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+
+    fig.legend()
+
+    # Close all open figures
+    plt.close()
+
+    return fig, ax
+
+
+def get_torch_pr_curve(y_true: torch.Tensor, y_pred: torch.Tensor, class_names: List[str] = []):
+    """
+    Compute PR curve between outcomes y_true, and predicted outcomes y_pred.
+
+    Returns:
+    - fig, ax pair of plt objects with the roc curves. Includes roc curve per each class.
+    """
+
+    # If class_names are empty then generate some placeholder names
+    num_classes = y_true.shape[1]
+    if class_names == []:
+        class_names = [f"Class {i}" for i in range(num_classes)]
+    pr_scores = get_torch_pr_auc_score(y_true, y_pred).detach().numpy()
+
+    # Initialize figure 
+    fig, ax = plt.subplots(figsize=(10, 10))
+    colors = get_cmap("tab10").colors # type: ignore
+
+    # Iterate through each class
+    for class_idx in range(num_classes):
+
+        # Class true and predicted values
+        y_true_class = y_true[:, class_idx]
+        y_pred_class = y_pred[:, class_idx]
+
+        # roc, auc values for this class
+        prc = pr_scores[class_idx] # type: ignore
+
+        # Compute ROC Curve
+        metrics.PrecisionRecallDisplay.from_predictions(
+            y_true=y_true_class, y_pred=y_pred_class, 
+            color=colors[class_idx], plot_chance_level=True,
+            ax=ax, name=f"Class {class_idx} (PR {prc:.2f}))", 
+        )
+        
+    ax.set_title("PR Curves")
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+
+    fig.legend()
+    # Close all open figures
+    plt.close()
+
+    return fig, ax
