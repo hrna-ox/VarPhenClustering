@@ -27,7 +27,48 @@ import src.models.loss_functions as LM_utils
 # endregion
 
 # ==================== UTILITY FUNCTION ====================
-def _logger_make_if_not_exist(save_path: str, header: List = [], objects: List = []):
+def _log_new_dir(save_dir: str = "exps/"):
+    """
+    If a save directory is not directly given, estimate a new one based on incremental Run IDs.
+
+    Params:
+    - save_dir: directory to save the plots and metrics.
+
+    Outputs:
+    - save_dir of the form 'save_dir/Run_XX', where XX is the next available number.
+    """
+
+    # Get all directories in save_dir
+    dirs = os.listdir(save_dir)
+
+    # Get all Run IDs
+    run_ids = [int(_dir.split("_")[-1]) for _dir in dirs if "Run_" in _dir]
+
+    # Get next Run ID
+    if len(run_ids) == 0:
+        next_run_id = 0
+    else:
+        next_run_id = max(run_ids) + 1
+
+    # Create new directory
+    new_dir = os.path.join(save_dir, f"Run_{next_run_id}")
+
+    return new_dir
+
+
+def _mkdirs_if_not_exist(*args):
+    """
+    Create directories if they do not exist.
+
+    Params:
+    - args: list of directories to create
+    """
+    for _dir in args:
+        if not os.path.exists(_dir):
+            os.makedirs(_dir)
+
+
+def _logger_make_csv_if_not_exist(save_path: str, header: List = [], objects: List = []):
     """
     Create a csv file if it does not exist, and append the header. If file exists, append objects.
 
@@ -45,6 +86,16 @@ def _logger_make_if_not_exist(save_path: str, header: List = [], objects: List =
         with open(save_path, "a", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(objects)
+
+
+def _get_save_timestamp():
+    """
+    Given the current timestamp, return a string with the format "YYYY-MM-DD_HH-MM-SS" for adding to save paths.
+    """
+    import datetime
+    now = datetime.datetime.now()
+    return now.strftime("%Y-%m-%d_%H-%M-%S")
+
 
 # region =============== MAIN ===============
 def logger_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: Union[np.ndarray, torch.Tensor], 

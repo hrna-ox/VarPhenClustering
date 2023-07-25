@@ -52,7 +52,7 @@ def sample_dir(alpha):
     return dir_samples
 
 
-def gen_samples_from_assign(pi_assign, c_means, log_c_vars):
+def compute_repr_from_clus_assign_prob(pi_assign, c_means, log_c_vars):
     """
     Generate samples from latent variable cluster assignment. We re-parameterize normal sampling
     in order to ensure back-propagation.
@@ -77,24 +77,24 @@ def gen_samples_from_assign(pi_assign, c_means, log_c_vars):
 
     return samples
 
-def gen_diagonal_mvn(mu_g: torch.Tensor, log_var_g: torch.Tensor) -> torch.Tensor:
+def generate_diagonal_multivariate_normal_samples(mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
     """
     Generate samples from multivariate normal distribution with diagonal covariance matrix. 
 
     Params:
-    - mu_g: tensor of shape (N, dim) with the mean vector of the distribution for each sample.
-    - log_var_g: tensor of shape (N, dim) with the log of the variance vector of the distribution for each sample.
+    - mu: tensor of shape (N, dim) with the mean vector of the distribution for each sample.
+    - logvar: tensor of shape (N, dim) with the log of the variance vector of the distribution for each sample.
 
     Outputs:
     - tensor of shape (N, dim) with generated samples.
     """
 
     # Get parameters
-    N, T, dim = mu_g.shape
+    N, dim = mu.shape
 
     # Generate standard normal samples and apply transformation to obtain multivariate normal
-    stn_samples = torch.randn(size=[N, T, dim], device=mu_g.device)
-    mvn_samples = mu_g + torch.exp(0.5 * log_var_g) * stn_samples
+    stn_samples = torch.randn(size=[N, dim], device=mu.device)
+    mvn_samples = mu + torch.exp(0.5 * logvar) * stn_samples
 
     return mvn_samples
 # endregion

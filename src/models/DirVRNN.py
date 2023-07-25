@@ -2,7 +2,7 @@
 Author: Henrique Aguiar
 Contact: henrique.aguiar@eng.ox.ac.uk
 
-Model file to define GC-DaPh class.
+This file defines the main proposed model, and how to train the model
 """
 
 # ============= IMPORT LIBRARIES ==============
@@ -13,23 +13,19 @@ import torch
 import torch.nn as nn
 import wandb
 
-import time
-
 from typing import Tuple, Dict, Union, List
 from torch.utils.data import DataLoader, TensorDataset
 
 import src.models.loss_functions as LM_utils
 from src.models.deep_learning_base_classes import MLP, LSTM_Dec_v1, LSTM_Dec_v2
 
-import src.models.DirVRNN.auxiliary_functions as model_utils
-from src.models.DirVRNN.auxiliary_functions import eps
-import src.models.DirVRNN.logger as logger
-
+import src.models.model_utils as model_utils
+import src.models.logging_utils as logger
 
 
 # region DirVRNN
 class DirVRNN(nn.Module):
-    """ 
+    """
     Implements DirVRNN model as described in the paper.
 
     Given a multi-dimensional time-series of observations, we model cluster assignments over time using a window approach. For each window:
@@ -38,32 +34,35 @@ class DirVRNN(nn.Module):
     c) estimate cell state,
     d) update cluster representations.
     """
-    def __init__(self, 
-                i_size: int, 
-                o_size: int, 
-                w_size: int,
-                K: int, 
-                l_size: int = 10,
-                n_fwd_blocks: int = 1,
-                gate_hidden_l: int = 2,
-                gate_hidden_n: int = 20,
-                bias: bool = True,
-                dropout: float = 0.0,
-                device: str = 'cpu',
-                seed: int = 42,
-                **kwargs):
+
+    def __init__(
+        self,
+        input_dims: int,
+        num_classes: int,
+        window_num_obvs: int,
+        K: int,
+        latent_dim: int = 10,
+        n_fwd_blocks: int = 1,
+        gate_num_hidden_layers: int = 2,
+        gate_num_hidden_nodes: int = 20,
+        bias: bool = True,
+        dropout: float = 0.0,
+        device: str = "cpu",
+        seed: int = 42,
+        **kwargs,
+    ):
         """
         Object initialization.
 
         Params:
-            - i_size: dimensionality of observation data (number of time_series).
-            - o_size: dimensionality of outcome data (number of outcomes).
-            - w_size: window size over which to update cell state and generate data.
+            - input_dims: dimensionality of observation data (number of time_series).
+            - num_classes: dimensionality of outcome data (number of outcomes).
+            - window_num_obvs: number of observations to consider in each window.
             - K: number of clusters to consider.
-            - l_size: dimensionality of latent space (default = 10).
+            - latent_dim: dimensionality of latent space (default = 10).
             - n_fwd_blocks: number of forward blocks to predict (int, default=1).
-            - gate_hidden_l: number of hidden layers for gate networks (default = 2).
-            - gate_hidden_n: number of nodes of hidden layers for gate networks (default = 20).
+            - gate_num_hidden_layers: number of hidden layers for gate networks (default = 2).
+            - gate_num_hidden_nodes: number of nodes of hidden layers for gate networks (default = 20).
             - bias: whether to include bias terms in MLPs (default = True).
             - dropout: dropout rate for MLPs (default = 0.0, i.e. no dropout).
             - device: device to use for computations (default = 'cpu').
@@ -73,330 +72,422 @@ class DirVRNN(nn.Module):
         super().__init__()
 
         # Initialise input parameters
-        self.i_size, self.o_size, self.w_size = i_size, o_size, w_size
-        self.K, self.l_size, self.n_fwd_blocks = K, l_size, n_fwd_blocks
-        self.gate_l, self.gate_n = gate_hidden_l, gate_hidden_n
-        self.device, self.seed = device, seed
+        self.input_dims = input_dims
+        self.num_classes = num_classes
+        self.window_num_obvs = window_num_obvs
+        self.K = K
+        self.latent_dim = latent_dim
+        self.n_fwd_blocks = n_fwd_blocks
+        self.gate_l = gate_num_hidden_layers
+        self.gate_n = gate_num_hidden_nodes
+        self.device = device
+        self.seed = seed
 
-        # Parameters for Clusters
+        # Initialize Cluster Mean and Variance Parameters
         self.c_means = nn.Parameter(
-                        torch.rand(
-                            (int(self.K), 
-                            int(self.l_size)
-                            ),
-                            requires_grad=True,
-                            device=self.device
-                        )
-                    )
+            torch.rand(
+                (int(self.K), int(self.latent_dim)),
+                requires_grad=True,
+                device=self.device,
+            )
+        )
         self.log_c_vars = nn.Parameter(
-                            torch.rand(
-                                (int(self.K), ),
-                                requires_grad=True,
-                                device=self.device
-                            )
-                        )
-        
-        # Ensure parameters are updatable
-        self.c_means.requires_grad = True
-        self.log_c_vars.requires_grad = True
+            torch.rand(
+                (int(self.K),), 
+                requires_grad=True, 
+                device=self.device)
+        )
 
 
         # Initialise encoder block - estimate alpha parameter of Dirichlet distribution given h and extracted input data features.
         self.encoder = MLP(
-            input_size = self.l_size + self.l_size,      # input: concat(h, extr(x)) 
-            output_size = self.K,                        # output: K-dimensional vector of cluster probabilities
-            hidden_layers = self.gate_l,                 # gate_l hidden_layers with gate_n nodes each
-            hidden_nodes = self.gate_n,                  # gate_n nodes per hidden layer
-            act_fn = nn.ReLU(),                          # default activation function is ReLU
-            bias = bias,
-            dropout = dropout
+            input_size=self.latent_dim + self.latent_dim,  # input: concat(h, extr(x))
+            output_size=self.K,  # output: K-dimensional vector of cluster probabilities
+            hidden_layers=self.gate_l,  # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes=self.gate_n,  # gate_n nodes per hidden layer
+            act_fn=nn.ReLU(),  # default activation function is ReLU
+            bias=bias,
+            dropout=dropout,
         )
-        self.enc_out = nn.Softmax(dim=-1)               # output is a probability distribution over clusters
+        self.encoder_output_fn = nn.Softmax(dim=-1)  
 
         # Initialise Prior Block - estimate alpha parameter of Dirichlet distribution given h.
         self.prior = MLP(
-            input_size = self.l_size,                    # input: h
-            output_size = self.K,                        # output: K-dimensional vector of cluster probabilities
-            hidden_layers = self.gate_l,                 # gate_l hidden_layers with gate_n nodes each
-            hidden_nodes = self.gate_n,                  # gate_n nodes per hidden layer
-            act_fn = nn.ReLU(),                          # default activation function is ReLU
-            bias = bias,
-            dropout = dropout
+            input_size=self.latent_dim,  # input: h
+            output_size=self.K,  # output: K-dimensional vector of cluster probabilities
+            hidden_layers=self.gate_l,  # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes=self.gate_n,  # gate_n nodes per hidden layer
+            act_fn=nn.ReLU(),  # default activation function is ReLU
+            bias=bias,
+            dropout=dropout,
         )
-        self.prior_out = nn.Softmax(dim=-1)             # output is a probability distribution over clusters
-        
-        # Initialise decoder block - given z, h, we generate a w_size sequence of observations, x.
+        self.prior_output_fn = nn.Softmax(dim=-1)
+
+        # Initialise decoder block - given z, h, we generate a window_num_obvs sequence of observations, x.
         self.decoder = LSTM_Dec_v1(
-            seq_len=self.w_size,
-            output_dim=self.i_size + self.i_size, # output is concatenation of mean-log var of observation
-            hidden_dim=self.l_size + self.l_size,  # state cell has same size as context vector (feat_extr(z) and h)
-            num_layers=1,
-            dropout=dropout
+            seq_len=self.window_num_obvs,
+            output_dim=self.input_dims + self.input_dims,  # output is concatenation of mean-log var of observation
+            hidden_dim=self.latent_dim + self.latent_dim,  # state cell has same size as context vector (feat_extr(z) and h)
+            dropout=dropout,
         )
 
         # Define the output network - computes outcome prediction given predicted cluster assignments
         self.predictor = MLP(
-            input_size = self.l_size,                    # input: h
-            output_size = self.o_size,                   # output: o_size-dimensional vector of outcome probabilities
-            hidden_layers = self.gate_l,                 # gate_l hidden_layers with gate_n nodes each
-            hidden_nodes = self.gate_n,                  # gate_n nodes per hidden layer
-            act_fn = nn.ReLU(),                          # default activation function is ReLU
-            bias = bias,
-            dropout = dropout
+            input_size=self.latent_dim,  # input: h
+            output_size=self.num_classes,  # output: num_classes-dimensional vector of outcome probabilities
+            hidden_layers=self.gate_l,  # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes=self.gate_n,  # gate_n nodes per hidden layer
+            act_fn=nn.ReLU(),  # default activation function is ReLU
+            bias=bias,
+            dropout=dropout,
         )
-        self.predictor_out = nn.Softmax(dim=-1)          # output is o_size-dimensional vector of outcome probabilities
-        
+        self.predictor_output_fn = nn.Softmax(dim=-1)
 
-        # Define feature transformation functions
+        # Define feature transformation gate networks
         self.phi_x = MLP(
-            input_size = self.i_size,                    # input: x
-            output_size = self.l_size,                   # output: l_size-dimensional vector of latent space features
-            hidden_layers = self.gate_l,                 # gate_l hidden_layers with gate_n nodes each
-            hidden_nodes = self.gate_n,                  # gate_n nodes per hidden layer
-            act_fn=nn.ReLU(),                            # default activation function is ReLU
-            bias=bias,                                   # default bias is True
-            dropout=dropout
+            input_size=self.input_dims,  # input: x
+            output_size=self.latent_dim,  # output: latent_dim-dimensional vector of latent space features
+            hidden_layers=self.gate_l,  # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes=self.gate_n,  # gate_n nodes per hidden layer
+            act_fn=nn.ReLU(),  # default activation function is ReLU
+            bias=bias,  # default bias is True
+            dropout=dropout,
         )
-        self.phi_x_out = nn.Tanh()                       # output is l_size-dimensional vector of latent space features
+        self.phi_x_output_fn = nn.ReLU()
 
         self.phi_z = MLP(
-            input_size = self.l_size,                    # input: z
-            output_size = self.l_size,                   # output: l_size-dimensional vector of latent space features
-            hidden_layers = self.gate_l,                 # gate_l hidden_layers with gate_n nodes each
-            hidden_nodes = self.gate_n,                  # gate_n nodes per hidden layer
-            act_fn=nn.ReLU(),                            # default activation function is ReLU
-            bias=bias,                                   # default bias is True
-            dropout=dropout
+            input_size=self.latent_dim,  # input: z
+            output_size=self.latent_dim,  # output: latent_dim-dimensional vector of latent space features
+            hidden_layers=self.gate_l,  # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes=self.gate_n,  # gate_n nodes per hidden layer
+            act_fn=nn.ReLU(),  # default activation function is ReLU
+            bias=bias,  # default bias is True
+            dropout=dropout,
         )
-        self.phi_z_out = nn.Tanh()                       # output is l_size-dimensional vector of latent space features
+        self.phi_z_output_fn = nn.ReLU()
 
         # Define Cell Update Gate Functions
         self.cell_update = MLP(
-            input_size=self.l_size + self.l_size + self.l_size, # input: concat(h, phi_x, phi_z)
-            output_size=self.l_size,                            # output: l_size-dimensional vector of cell state updates
-            hidden_layers=self.gate_l,                          # gate_l hidden_layers with gate_n nodes each
-            hidden_nodes=self.gate_n,                           # gate_n nodes per hidden layer
-            act_fn=nn.ReLU(),                                   # default activation function is ReLU
-            bias=bias,                                          # default bias is True
-            dropout=dropout
+            input_size=self.latent_dim + self.latent_dim + self.latent_dim,  # input: concat(h, phi_x, phi_z)
+            output_size=self.latent_dim,  # output: latent_dim-dimensional vector of cell state updates
+            hidden_layers=self.gate_l,  # gate_l hidden_layers with gate_n nodes each
+            hidden_nodes=self.gate_n,  # gate_n nodes per hidden layer
+            act_fn=nn.ReLU(),  # default activation function is ReLU
+            bias=bias,  # default bias is True
+            dropout=dropout,
         )
-        self.cell_update_out = nn.Tanh()
+        self.cell_update_output_fn = nn.ReLU()
+
+    
+    "Define methods to simplify passes through network blocks"
+    def _apply_encoder(self, x):
+        return self.encoder_output_fn(self.encoder(x))
+
+    def _apply_prior(self, h):
+        return self.prior_output_fn(self.prior(h))
+
+    def _apply_decoder(self, c):
+        return self.decoder(c)
+
+    def _apply_predictor(self, z):
+        return self.predictor_output_fn(self.predictor(z))
+    
+    def _apply_cell_update(self, x):
+        return self.cell_update_output_fn(self.cell_update(x))
+    
+    def _transform_x(self, x):
+        return self.phi_x_output_fn(self.phi_x(x))
+    
+    def _transform_z(self, z):
+        return self.phi_z_output_fn(self.phi_z(z))
+    
+    def _encoder_pass(self, h, x):
+        "Single pass of the encoder to obtain alpha inference param."
+        return self._apply_encoder(torch.cat([self._transform_x(x), h], dim=-1))
+    
+    def _prior_pass(self, h):
+        "Single pass of the prior to obtain alpha prior param."
+        return self._apply_prior(h)
+    
+    def _cell_update_pass(self, h, x, z):
+        "Single pass of the cell update to obtain updated cell state."
+        return self._apply_cell_update(torch.cat([h, self._transform_x(x), self._transform_z(z)], dim=-1))
+    
+    def _predictor_pass(self, z):
+        "Single pass of the predictor to obtain outcome prediction."
+        return self._apply_predictor(z)
+    
+    def _decoder_pass(self, h, z):
+        "Single pass of the decoder to obtain generated data."
+        return self._apply_decoder(torch.cat([self._transform_z(z), h], dim=-1))
 
 
-    # Define training process for this class.
-    def forward(self, x, y) -> Tuple[torch.Tensor, Dict]:
+
+    # Define forward pass over a single batch
+    def forward(self, x, y, mode: str = "train"):
         """
         Forward Pass computation for a single pair of batch objects x and y.
 
         Params:
             - x: pytorch Tensor object of input data with shape (batch_size, max_seq_len, input_size);
             - y: pytorch Tensor object of corresponding outcomes with shape (batch_size, outcome_size).
+            - mode: string indicating whether we are training or evaluating (default = 'train'). This parameter controls whether we track objects or not (i.e. just losses).
 
         Output:
             - loss: pytorch Tensor object of loss value.
             - history: dictionary of relevant training history.
 
-        We iterate over consecutive window time blocks. Within each window, we use the hidden state obtained at
-        the last time window, and we generate mean and variance values for the subsequent window. Within the following
-        window, we also use the true data and last hidden state to generate alpha and estimate zs values for
-        each time step.
+        We iterate over consecutive window time blocks. For the current window block, we use the hidden state obtained at
+        the last time window, and we generate mean and variance for generating data at the current window block. We also use the true data 
+        to generate latent representations.
 
-        Loss is computed by summing a) Log Lik loss (how good we are at predicting data), b) KL loss (how close
-        the updated alpha approximates the posterior, and c) outcome loss, taken at the last time step, which 
-        indicates whether we are able to predict the outcome correctly. Losses are computed at each time step
-        for all windows except the latter, as it denotes a 'look' into the future.
+        Values are initialized at 0. At the last observed time-step, we compute self.n_fwd_blocks windows of prediction forward. At the last 
+        forward block, we use the estimated representations to predict the outcome.
 
-        Losses are saved as:
-        - - ELBO: Negative Evidence Lower Bound (Log Lik - KL_loss + outcome_loss), averaged over batch.
-        - Log Likelihood: Log Likelihood of data, averaged over batch, and saved for each time step.
-        - KL Loss: KL Loss between prior and posterior, averaged over batch, and saved for each time step.
-        - Outcome Loss: Loss of outcome prediction, averaged over batch.
+        Loss is computed by summing (all losses averaged over batch):
+            a) Log Lik loss (how good we are at generating data), 
+            b) KL loss (how close the updated alpha approximates the posterior, and 
+            c) outcome loss, taken at the last time step, which indicates whether we are able to predict the outcome correctly. 
         """
 
-        # ========= Define relevant variables and initialise variables ===========
-        x, y = x.to(self.device), y.to(self.device) # move data to device
+        # ========= Define relevant variables ===========
+        x, y = x.to(self.device), y.to(self.device)  # move data to device
+        assert mode in ["train", "eval"], "Mode has to be either 'train' or 'eval'."
 
         # Extract dimensions
         batch_size, seq_len, input_size = x.size()
 
-        # Pre-fill the data tensor with zeros if we have a sequence length that is not a multiple of w_size
-        remainder = seq_len % self.w_size
+
+        # Pre-fill the data tensor with zeros if we have a sequence length that is not a multiple of window_num_obvs
+        remainder = seq_len % self.window_num_obvs
         if remainder != 0:
 
-            # Calculate number of zeros to pre-append and the minimum index from which real data exists
-            timestp_to_append = self.w_size - remainder
-
-            # Pre-pend the input data with zeros to make it a multiple of w_size
-            zeros_append = torch.zeros(batch_size, timestp_to_append, input_size, device=self.device)
+            # Pre-pend the input data with zeros to make it a multiple of window_num_obvs
+            zeros_append = torch.zeros(batch_size, self.window_num_obvs - remainder, input_size, device=self.device)
             x = torch.cat((zeros_append, x), dim=1)
 
             # Update seq_len
-            seq_len = x.size(1)
-            assert (seq_len % self.w_size == 0) # Sequence length is not a multiple of w_size
+            seq_len = seq_len + self.window_num_obvs - remainder
+            assert (seq_len % self.window_num_obvs == 0)
 
-        
-        # Get number of time steps that we have
-        num_time_steps = int(seq_len / self.w_size)
+        # Get number of iterative windows
+        num_windows = int(seq_len / self.window_num_obvs)
 
 
-        # Initialization of pi, z, and h assignments
-        h = torch.zeros(batch_size, self.l_size, device=self.device)
+        # ========== Initialise relevant variables ==========
+        h = torch.zeros(batch_size, self.latent_dim, device=self.device)
         est_pi = torch.ones(batch_size, self.K, device=self.device) / self.K
-        est_z = model_utils.gen_samples_from_assign(est_pi, self.c_means, self.log_c_vars)
-                
+        est_z = model_utils.compute_repr_from_clus_assign_prob(est_pi, self.c_means, self.log_c_vars)
 
-        # Initialise of Loss and History Tracker Objects - note time length includes forward prediction window
-        ELBO = 0
+
+        # Initialize ELBO, history tracker and future tracker
+        ELBO, Loss_loglik, Loss_kl, Loss_outl = torch.zeros(1, device=self.device), torch.zeros(1, device=self.device), torch.zeros(1, device=self.device), torch.zeros(1, device=self.device)
         history = {
-            "loss_loglik": torch.zeros(seq_len, device=x.device),
-            "loss_kl": torch.zeros(seq_len, device=x.device),
+            "loss_loglik": torch.zeros(seq_len, device=self.device),
+            "loss_kl": torch.zeros(seq_len, device=self.device),
             "loss_out": 0,
-            "pis": torch.zeros(batch_size, seq_len + self.w_size, self.K, device=self.device),
-            "zs": torch.zeros(batch_size, seq_len + self.w_size, self.l_size, device=self.device),
-            "alpha_encs": torch.zeros(batch_size, seq_len + self.w_size, self.K, device=self.device),
-            "mugs": torch.zeros(batch_size, seq_len + self.w_size, self.i_size, device=self.device),
-            "log_vargs": torch.zeros(batch_size, seq_len + self.w_size, self.i_size, device=self.device)
+            "pis": torch.zeros(batch_size, seq_len, self.K, device=self.device),
+            "zs": torch.zeros(batch_size, seq_len, self.latent_dim, device=self.device),
+            "alpha_encs": torch.zeros(batch_size, seq_len, self.K, device=self.device),
+            "gen_means": torch.zeros(batch_size, seq_len, self.input_dims, device=self.device),
+            "gen_log_vars": torch.zeros(batch_size, seq_len, self.input_dims, device=self.device),
+            "y_pred": torch.zeros(batch_size, self.num_classes, device=self.device)
+        }
+        future = {
+            "loss_loglik": torch.zeros(self.n_fwd_blocks * self.window_num_obvs, device=self.device),
+            "loss_kl": torch.zeros(self.n_fwd_blocks * self.window_num_obvs, device=self.device),
+            "loss_out": 0,
+            "pis": torch.zeros(batch_size, self.n_fwd_blocks * self.window_num_obvs, self.K, device=self.device),
+            "zs": torch.zeros(batch_size, self.n_fwd_blocks * self.window_num_obvs, self.latent_dim, device=self.device),
+            "alpha_encs": torch.zeros(batch_size, self.n_fwd_blocks * self.window_num_obvs, self.K, device=self.device),
+            "gen_means": torch.zeros(batch_size, self.n_fwd_blocks * self.window_num_obvs, self.input_dims, device=self.device),
+            "gen_log_vars": torch.zeros(batch_size, self.n_fwd_blocks * self.window_num_obvs, self.input_dims, device=self.device),
+            "y_pred": torch.zeros(batch_size, self.num_classes, device=self.device)
         }
 
 
+        # ================== Iterate through time ==================
+        """
+        Note we iterate over window blocks, and within each block we iterate over individual time steps to compute loss functions.
+        There is a past component (data was pre-filled), and a future component (we predict forward self.n_fwd_blocks windows).
+        """
 
-
-        # ================== Iteration through time-steps  ==============
-
-        # We iterate over all windows of our analysis, this includes the last window where we look into the future and do not compute losses.
-        for window_id in range(num_time_steps + self.n_fwd_blocks):
-            "Iterate through each window block"
+        # Iterate OVER PAST
+        windows_obvs = range(num_windows)
+        for window_id in windows_obvs:
 
             # Bottom and high indices
-            lower_t, higher_t = window_id * self.w_size, (window_id + 1) * self.w_size
+            _lower_t_idx = window_id * self.window_num_obvs     # INCLUSIVE 
+            _upper_t_idx = (window_id + 1) * self.window_num_obvs    # EXCLUSIVE
 
-            # First we estimate the observations for the incoming window given current estimates. This is of shape (bs, w_size, 2*input_size)
-            _, _, data_gen = self.decoder_pass(h=h, z=est_z)
+            # Generate data for current window block given the existing estimates - decompose into mean and log-variance
+            _, _, data_gen_params = self._decoder_pass(h=h, z=est_z)
+            gen_mean, gen_logvar = torch.chunk(data_gen_params, chunks=2, dim=-1)
+        
+        
+            # Iterate through each time step to estimate updated representations and compute loss terms
+            for inner_t_idx, outer_t_idx in enumerate(range(_lower_t_idx, _upper_t_idx)):
 
-            # Decompose obvs_pred into mean and log-variance - shape is (bs, w_size, 2 * input_size)
-            mu_g, logvar_g = torch.chunk(data_gen, chunks=2, dim=-1)
-            var_g = torch.exp(logvar_g) + eps
+                # Access input data at time t
+                x_t = x[:, outer_t_idx, :]
+                _est_mean, _est_logvar = gen_mean[:, inner_t_idx, :], gen_logvar[:, inner_t_idx, :]
 
-            for _w_id, t in enumerate(range(lower_t, higher_t)):
-                # Estimate alphas for each time step within the window. 
+                # Compute alphas of prior and encoder networks given previous cell estimate and current input data
+                alpha_prior = self._prior_pass(h=h)
+                alpha_enc = self._encoder_pass(h=h, x=x_t)
 
-                # Use true data if within the original data size, else use generated data
-                if t < seq_len:
-                    x_t = x[:, t, :]
+                # Sample cluster probs given Dirichlet parameter, and estimate representations based on mixture of Gaussian model
+                est_pi = model_utils.sample_dir(alpha=alpha_enc)
+                est_z = model_utils.compute_repr_from_clus_assign_prob(pi_assign=est_pi, c_means=self.c_means, log_c_vars=self.log_c_vars)
 
-                else:
-                    gen_samples = model_utils.gen_diagonal_mvn(mu_g=mu_g, log_var_g = logvar_g)
-                    x_t = gen_samples[:, _w_id, :]
+                # Update Cell State
+                h = self._cell_update_pass(h=h, x=x_t, z=est_z)
+
+                # Compute Loss Terms
+                log_lik = LM_utils.torch_log_Gauss_likelihood(x=x_t, mu=_est_mean, logvar=_est_logvar, device=self.device)
+                kl_div = LM_utils.torch_dir_kl_div(a1=alpha_enc, a2=alpha_prior)
+                ELBO += log_lik - kl_div
+                Loss_kl += kl_div
+                Loss_loglik += log_lik
+
+                # Append objects to history tracker if we are in evaluation mode
+                if mode == "eval":
+                    history["pis"][:, outer_t_idx, :] = est_pi
+                    history["zs"][:, outer_t_idx, :] = est_z
+                    history["alpha_encs"][:, outer_t_idx, :] = alpha_enc
+
+                    # Append generate mean, generate var
+                    history["gen_means"][:, outer_t_idx, :] = _est_mean
+                    history["gen_log_vars"][:, outer_t_idx, :] = _est_logvar
+
+                    # Add to loss tracker
+                    history["loss_kl"][outer_t_idx] += kl_div
+                    history["loss_loglik"][outer_t_idx] += log_lik
+
+
+
+        # Iterate OVER FUTURE windows
+        windows_ftr = range(self.n_fwd_blocks)
+        for window_id in windows_ftr:
+
+            # Bottom and high indices
+            _lower_t_idx = window_id * self.window_num_obvs     # INCLUSIVE 
+            _upper_t_idx = (window_id + 1) * self.window_num_obvs    # EXCLUSIVE
+
+            # Generate data for current window block given the existing estimates - decompose into mean and log-variance
+            _, _, data_gen_params = self._decoder_pass(h=h, z=est_z)
+            gen_mean, gen_logvar = torch.chunk(data_gen_params, chunks=2, dim=-1)
+
+
+            # Iterate through each time step to estimate updated representations and compute loss terms
+            for inner_t_idx, outer_t_idx in enumerate(range(_lower_t_idx, _upper_t_idx)):
+
+                # Generate data at time t based on generate parameters mean and log-variance
+                _est_mean, _est_logvar = gen_mean[:, inner_t_idx, :], gen_logvar[:, inner_t_idx, :]
+                gen_x_t = model_utils.generate_diagonal_multivariate_normal_samples(
+                    mu=_est_mean, 
+                    logvar=_est_logvar
+                )
 
                 # Compute alphas of prior and encoder networks
-                alpha_prior = self.prior_pass(h=h)
-                alpha_enc = self.encoder_pass(h=h, x=x_t)
-
+                alpha_prior = self._prior_pass(h=h)
+                alpha_enc = self._encoder_pass(h=h, x=gen_x_t)
 
                 # Sample cluster distribution from alpha_enc, and estimate samples from clusters based on mixture of Gaussian model
                 est_pi = model_utils.sample_dir(alpha=alpha_enc)
-                est_z = model_utils.gen_samples_from_assign(
-                    pi_assign=est_pi, 
-                    c_means=self.c_means, 
-                    log_c_vars=self.log_c_vars
-                )
+                est_z = model_utils.compute_repr_from_clus_assign_prob(pi_assign=est_pi, c_means=self.c_means, log_c_vars=self.log_c_vars)
 
-                # ----- UPDATE CELL STATE ------
-                h = self.state_update_pass(h=h, x=x_t, z=est_z)
+                # Update Cell State
+                h = self._cell_update_pass(h=h, x=gen_x_t, z=est_z)
 
-                # Append objects FOR ALL TIME STEPS
-                history["pis"][:, t, :] = est_pi
-                history["zs"][:, t, :] = est_z
-                history["alpha_encs"][:, t, :] = alpha_enc
-                history["mugs"][:, t, :] = mu_g[:, _w_id, :]
-                history["log_vargs"][:, t, :] = logvar_g[:, _w_id, :]
+                # Compute Loss Terms
+                future_loglik = LM_utils.torch_log_Gauss_likelihood(x=gen_x_t, mu=_est_mean, logvar=_est_logvar, device=self.device)
+                future_kl = LM_utils.torch_dir_kl_div(a1=alpha_enc, a2=alpha_prior)
 
+                # Append objects to future tracker if we are in evaluation mode
+                if mode == "eval":
+                    future["pis"][:, outer_t_idx, :] = est_pi
+                    future["zs"][:, outer_t_idx, :] = est_z
+                    future["alpha_encs"][:, outer_t_idx, :] = alpha_enc
 
-                # -------- COMPUTE LOSS FOR TIME t if time is not in the future ---------
+                    # Append generate mean, generate var
+                    future["gen_means"][:, outer_t_idx, :] = _est_mean
+                    future["gen_log_vars"][:, outer_t_idx, :] = _est_logvar
 
-                if t < seq_len:
-                        
-                    # Compute log likelihood loss and KL divergence loss
-                    log_lik = LM_utils.torch_log_gaussian_lik(x_t, mu_g[:, _w_id, :], var_g[:, _w_id, :], device=self.device)
-                    kl_div = LM_utils.dir_kl_div(a1=alpha_enc, a2=alpha_prior)
 
                     # Add to loss tracker
-                    ELBO += log_lik - kl_div
-
-                    # Append lOSSES TO HISTORY TRACKERS WITHIN THE ALLOWED SEQUENCE OF STEPS
-                    history["loss_kl"][t] += torch.mean(kl_div, dim=0)
-                    history["loss_loglik"][t] += torch.mean(log_lik, dim=0)
+                    future["loss_kl"][outer_t_idx] += future_kl
+                    future["loss_loglik"][outer_t_idx] += future_loglik
 
 
-        # Once all times have been computed, make predictions on outcome
-        y_pred = self.predictor_pass(z=est_z)
-        history["y_preds"] = y_pred
-
-        # Compute log loss of outcome
-        pred_loss = LM_utils.cat_cross_entropy(y_true=y, y_pred=y_pred)
-
-        # Add to total loss
+        # Once everything is computed, make predictions on outcome and compute loss
+        y_pred = self._predictor_pass(z=est_z)
+        pred_loss = LM_utils.torch_CatCE(y_true=y, y_pred=y_pred)
         ELBO += pred_loss
+        Loss_outl += pred_loss
 
-        # Compute average per batch
-        ELBO = torch.mean(ELBO, dim=0)
+        # Append objects to trackers if we are in evaluation mode
+        if mode == "eval":
+            future["y_pred"] = y_pred
+            history["y_pred"] = y_pred
 
-        # Append to history tracker
-        history["loss_out"] += torch.mean(pred_loss, dim=0)
+            # Append Loss to tracker
+            history["loss_out"] = Loss_outl
+            future["loss_out"] = Loss_outl
 
-        return (-1) * ELBO, history      # want to maximize loss, so return negative loss
-    
-    def fit(self, 
-            train_data, val_data,
-            K_fold_idx: int = 1,
-            lr: float = 0.001, 
-            batch_size: int = 32,
-            num_epochs: int = 100,
-            viz_params: Dict = {}
-        ):
+        return (-1) * ELBO, Loss_loglik, Loss_kl, Loss_outl, history  # want to maximize ELBO, so return - ELBO
+
+
+    # Define method to train model on given data
+    def fit(self,
+        train_data, val_data,
+        lr: float = 0.001,
+        batch_size: int = 32,
+        num_epochs: int = 100,
+        save_params: Union[Dict, None] = None
+    ):
         """
         Method to train model given train and validation data, as well as training parameters.
 
         Params:
             - train_data: Tuple (X, y) of training data, with shape (N, T, D) and (N, O), respectively.
             - val_data: Tuple (X, y) of validation data. If None or (None, None), then no validation is performed.
-            - K_fold_idx: index of current fold in K-fold cross-validation. If no Cross validation, then this parameter is set to 1.
             - lr: learning rate for optimizer.
             - batch_size: batch size for training.
             - num_epochs: number of epochs to train for.
-            - viz_params: dictionary of parameters for visualization. If None, then some placeholders are passed.
-                - save_dir: directory to save visualization results.
-                - fold: current fold in K-fold cross-validation.
-                - features: list of feature names.
-                - outcomes: list of outcome names.
+            - save_params: dictionary of parameters for saving. See src.models.logging_utils for more details. Pertains data saving. If None, then no saving is performed.
 
         Outputs:
             - loss: final loss value.
             - history: dictionary with training history, including each loss component.
         """
-        # ================== PARAMETER CHECKING AND SAVE HANDLING ==================
-        # Parse visualization parameters
-        save_dir = viz_params["save_dir"]
+
+
+        # ======= Experiment Tracking =======
+        if save_params is None:
+            save_dir = logger._log_new_dir("exps/DirVRNN/")
+        
+        else:
+            save_dir = f"exps/DirVRNN/Run_{save_params['run_name']}" 
+
+        # Append time stamp to save directory
+        save_dir = save_dir + "_" + logger._get_save_timestamp()
+        print("Saving to directory: {}".format(save_dir))
 
         # Create save directory and scores file if it does not exist
-        train_fd = f"{save_dir}/train"
-        val_fd = f"{save_dir}/val"
+        train_fd = os.path.join(save_dir, "train")
+        val_fd = os.path.join(save_dir, "val")
+        logger._mkdirs_if_not_exist(save_dir, train_fd, val_fd)
 
-        with open(f"{train_fd}/train_losses.csv", "w", newline="") as f:
-
-            # Write header
-            writer = csv.writer(f)
-            writer.writerow(["epoch", "loss", "loss_kl", "loss_loglik", "loss_out"])
-
-        with open(f"{val_fd}/val_losses.csv", "w", newline="") as f:
-            
-            # Write header
-            writer = csv.writer(f)
-            writer.writerow(["epoch", "loss", "loss_kl", "loss_loglik", "loss_out"])
+        # Initialize Loss Trackers and CSV output file
+        _loss_headers = ["epoch", "loss", "loss_kl", "loss_loglik", "loss_out"]
+        logger._logger_make_csv_if_not_exist(f"{train_fd}/loss_tracker.csv", _loss_headers)
+        logger._logger_make_csv_if_not_exist(f"{val_fd}/loss_tracker.csv", _loss_headers)
 
 
 
         # ================== DATA PREPARATION ==================
+
         # Unpack data and make data loaders
         X_train, y_train = train_data
         X_val, y_val = val_data
@@ -407,88 +498,93 @@ class DirVRNN(nn.Module):
 
         # Define optimizer and Logging of weights
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        wandb.watch(
-                models=self, 
-                log="all", 
-                log_freq=1, 
-                idx = K_fold_idx
-            )
-        
+        wandb.watch(models=self, log="all", log_freq=1, idx=save_params["K_fold_idx"] if save_params is not None else 1)
+
+        # dictionary to save objects for logging
+        _exp_objects_saver = {}                      
+
+
 
         # ================== TRAINING-VALIDATION LOOP ==================
-        history_objects = {}
         for epoch in range(1, num_epochs + 1):
 
-            # Set model to train mode and initialize loss tracker
+            # Set model to train mode 
             self.train()
-            train_loss = torch.zeros(1, device=self.device)
-            train_loglik = torch.zeros(1, device=self.device)
-            train_kl = torch.zeros(1, device=self.device)
-            train_out = torch.zeros(1, device=self.device)
+
+            # Initialize loss trackers
+            tr_loss = torch.zeros(1, device=self.device)
+            tr_loglik = torch.zeros(1, device=self.device)
+            tr_kl = torch.zeros(1, device=self.device)
+            tr_outl = torch.zeros(1, device=self.device)
 
             # Iterate through batches
-            batch_id = 0
             for batch_id, (x, y) in enumerate(train_loader):
 
                 # Zero out gradients for each batch
                 optimizer.zero_grad()
 
                 # Compute Loss for single model pass
-                loss, history_objects = self.forward(x, y)
-                batch_loglik, batch_kl, batch_outl = history_objects["loss_loglik"], history_objects["loss_kl"], history_objects["loss_out"]
+                batch_loss, batch_loglik, batch_kl, batch_outl, _ = self.forward(x, y, mode="train")
 
                 # Back-propagate loss and update weights
-                loss.backward()
+                batch_loss.backward()
                 optimizer.step()
 
-                # Add to loss tracker
-                train_loss += loss.item()
-                train_loglik += torch.sum(batch_loglik)         # Sums over time
-                train_kl += torch.sum(batch_kl)                 # Sum over time
-                train_out += batch_outl                 # Add batch loss total loss over batch
-
                 # Print message of loss per batch, which is re-setted at the end of each epoch
-                print("Train epoch: {}   [{:.2f} - {:.0f}%]".format(
-                    epoch, loss.item(), 100. * batch_id / len(train_loader)),
-                    end="\r")
-                
+                _perc_completed = 100.0 * batch_id / len(train_loader)
+                print(f"Train epoch: {epoch}   [{batch_loss.item():.2f} - {_perc_completed}]", end="\r")
+
+                # Add to training losses - we can add mean of batches and take mean over training loss dividing by number of batches
+                tr_loss += batch_loss.item()
+                tr_loglik += batch_loglik.item()
+                tr_kl += batch_kl.item()
+                tr_outl += batch_outl.item()  
+
             # Take average over all batches in the train data
-            epoch_loss = train_loss / (batch_id + 1)
-            epoch_loglik = train_loglik / (batch_id + 1)
-            epoch_kl = train_kl / (batch_id + 1)
-            epoch_out = train_out / (batch_id + 1)
+            ep_loss, ep_loglik, ep_kl, ep_outl = tr_loss / len(train_loader), tr_loglik / len(train_loader), tr_kl / len(train_loader), tr_outl / len(train_loader)
 
             # Print Message at the end of each epoch with the main loss and all auxiliary loss functions
-            print("Train {} ({:.0f}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - out {:.2f}]".format(
-                epoch, 100, 
-                epoch_loss.item(), epoch_loglik.item(), epoch_kl.item(), epoch_out.item()), end="     ")
-                
+            print(
+                "Train {} ({:.0f}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - out {:.2f}]".format(
+                    epoch, 100, ep_loss, ep_loglik, ep_kl, ep_outl
+                ),
+                end="     ",
+            )
+
+            
+            # ============== LOGGING ==============
             
             # Log objects to Weights and Biases
-            wandb.log({"train/epoch": epoch + 1, "train/loss": epoch_loss, "train/loglik": epoch_loglik,
-                "train/kldiv": epoch_kl, "train/out_l": epoch_out
-                }, 
-                step=epoch+1
-            )	
+            wandb.log(
+                {
+                    "train/epoch": epoch + 1,
+                    "train/loss": ep_loss,
+                    "train/loglik": ep_loglik,
+                    "train/kldiv": ep_kl,
+                    "train/out_l": ep_outl,
+                },
+                step=epoch + 1,
+            )
 
             # Save to CSV file
             with open(f"{train_fd}/train_losses.csv", "a", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow([epoch, epoch_loss.item(), epoch_kl.item(), epoch_loglik.item(), epoch_out.item()])
+                writer.writerow([epoch, ep_loss.item(), ep_loglik.item(), ep_kl.item(), ep_outl.item()])
 
-    
             # Check performance on validation set if exists
-            val_loss, outputs_val = self.validate(X_val, y_val, epoch=epoch, viz_params=viz_params)    
+            val_loss, outputs_val = self._eval(
+                X_val, y_val, epoch=epoch, viz_params=viz_params
+            )
 
         # At the end of training, save the data and the final outputs
         history_objects["X_train"] = X_train
-        history_objects["y_train"] = y_train    
-        
+        history_objects["y_train"] = y_train
+
         # Save to pickle
         with open(f"{train_fd}/train_outputs.pkl", "wb") as f:
             pickle.dump(history_objects, f)
 
-        # Do the same for validation data 
+        # Do the same for validation data
         outputs_val["X_val"] = X_val
         outputs_val["y_val"] = y_val
 
@@ -496,9 +592,7 @@ class DirVRNN(nn.Module):
         with open(f"{val_fd}/val_outputs.pkl", "wb") as f:
             pickle.dump(outputs_val, f)
 
-
-
-    def validate(self, X, y, epoch: int, viz_params: Dict):
+    def _eval(self, X, y, epoch: int, viz_params: Dict):
         """
         Compute Performance on Val Dataset.
 
@@ -520,23 +614,18 @@ class DirVRNN(nn.Module):
         features = viz_params["features"]
         outcomes = viz_params["outcomes"]
 
-
-
-
-        # Set model to evaluation mode 
+        # Set model to evaluation mode
         self.eval()
 
         # Prepare Data
         val_data = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
         val_loader = DataLoader(val_data, batch_size=X.shape[0], shuffle=False)
 
-
         # Apply forward prediction
         with torch.inference_mode():
             for X, y in val_loader:
-                
-                # Run model once through the 
-                val_loss, history_objects = self.forward(X, y)
+                # Run model once through the
+                val_loss, history_objects = self.forward(X, y, mode="eval")
 
                 # Load individual Losses from tracker
                 log_lik = torch.sum(history_objects["loss_loglik"])
@@ -544,52 +633,80 @@ class DirVRNN(nn.Module):
                 out_l = history_objects["loss_out"]
 
                 # Log Losses
-                wandb.log({
-                    "val/epoch": epoch + 1, "val/loss": val_loss, "val/loglik": log_lik,
-                    "val/kldiv": kl_div, "val/out_l": out_l,
+                wandb.log(
+                    {
+                        "val/epoch": epoch + 1,
+                        "val/loss": val_loss,
+                        "val/loglik": log_lik,
+                        "val/kldiv": kl_div,
+                        "val/out_l": out_l,
                     },
-                    step=epoch+1
+                    step=epoch + 1,
                 )
 
-
                 # Print message
-                print("Val epoch {} ({:.0f}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - out {:.2f}]".format(
-                    epoch, 100, val_loss.item(), log_lik.item(), 
-                    kl_div.item(), out_l.item()
+                print(
+                    "Val epoch {} ({:.0f}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - out {:.2f}]".format(
+                        epoch,
+                        100,
+                        val_loss.item(),
+                        log_lik.item(),
+                        kl_div.item(),
+                        out_l.item(),
                     )
                 )
 
                 # Save to CSV file
                 with open(f"{val_fd}/val_losses.csv", "a", newline="") as f:
                     writer = csv.writer(f)
-                    writer.writerow([epoch, val_loss.item(), kl_div.item(), log_lik.item(), out_l.item()])
-
+                    writer.writerow(
+                        [
+                            epoch,
+                            val_loss.item(),
+                            kl_div.item(),
+                            log_lik.item(),
+                            out_l.item(),
+                        ]
+                    )
 
                 # Log performance evaluation scores
-                logger.logger_sup_scores(y_true=y, y_pred=history_objects["y_pred"],save_dir=val_fd, epoch=epoch, class_names=outcomes)
+                logger.logger_sup_scores(
+                    y_true=y,
+                    y_pred=history_objects["y_pred"],
+                    save_dir=val_fd,
+                    epoch=epoch,
+                    class_names=outcomes,
+                )
 
                 # Log clustering evaluation scores
-                
 
                 # Log more complex results
-                model_params={
+                model_params = {
                     "c_means": self.c_means,
                     "log_c_vars": self.log_c_vars,
                     "seed": self.seed,
                 }
 
-                # logger(model_params=model_params, X=X, y=y, 
-                #    log=history_objects, 
-                #    epoch=epoch, mode="val", 
+                # logger(model_params=model_params, X=X, y=y,
+                #    log=history_objects,
+                #    epoch=epoch, mode="val",
                 #    outcomes=outcomes, features=features, save_dir=save_dir
                 # )
 
                 return val_loss, history_objects
 
-    def predict(self, X ,y, run_config: Union[Dict, None] = None, class_names: List = [], feat_names: List = [], save_dir: Union[str, None] = None):
+    def predict(
+        self,
+        X,
+        y,
+        run_config: Union[Dict, None] = None,
+        class_names: List = [],
+        feat_names: List = [],
+        save_dir: Union[str, None] = None,
+    ):
         """Similar to forward method, but focus on inner computations and tracking objects for the model."""
 
-        # Set model to evaluation mode 
+        # Set model to evaluation mode
         self.eval()
 
         # Prepare Data
@@ -599,21 +716,28 @@ class DirVRNN(nn.Module):
         # Apply forward prediction
         with torch.inference_mode():
             for X, y in test_loader:
-
                 # Pass data through model
-                _, history_objects = self.forward(X, y)      # Run forward pass
+                _, history_objects = self.forward(X, y)  # Run forward pass
 
                 # Log results
                 if save_dir is not None:
-                        
-                    model_params={
+                    model_params = {
                         "c_means": self.c_means,
                         "log_c_vars": self.log_c_vars,
                         "seed": self.seed,
                     }
 
-                    logger(model_params=model_params, X=X, y=y, log=history_objects, epoch=0, mode="test", class_names=class_names, feat_names=feat_names,
-                            save_dir = save_dir)
+                    logger(
+                        model_params=model_params,
+                        X=X,
+                        y=y,
+                        log=history_objects,
+                        epoch=0,
+                        mode="test",
+                        class_names=class_names,
+                        feat_names=feat_names,
+                        save_dir=save_dir,
+                    )
 
                 # Append Test data
                 history_objects["X_test"] = X
@@ -621,48 +745,4 @@ class DirVRNN(nn.Module):
                 history_objects["run_config"] = run_config
 
                 return history_objects
-    
-    # Useful methods for model
-    def x_feat_extr(self, x):
-        return self.phi_x_out(self.phi_x(x))
-    
-    def z_feat_extr(self, z):
-        return self.phi_z_out(self.phi_z(z))
-    
-    def encoder_pass(self, h, x):
-        "Single pass of the encoder to obtain alpha param."
-        return self.enc_out(
-                    self.encoder(
-                        torch.cat([
-                            self.x_feat_extr(x), # Extract feature from x
-                            h
-                        ], dim=-1)  # Concatenate x with cell state in last dimension
-                    ) 
-                ) + eps  # Add small value to avoid numerical instability
-
-    def decoder_pass(self, h, z):
-        return self.decoder(
-                    torch.cat([
-                        self.z_feat_extr(z),  # Extract feature from z
-                        h
-                    ], dim=-1)  # Concatenate z with cell state in last dimension
-                ) 
-    
-    def state_update_pass(self, h, x, z):
-        return self.cell_update_out(            # Final layer of MLP gate
-                        self.cell_update(
-                            torch.cat([
-                                self.z_feat_extr(z), # Extract feature from z
-                                self.x_feat_extr(x), # Extract feature from x
-                                h            # Previous cell state
-                            ], dim=-1) # Concatenate z with cell state in last dimension
-                        )
-                )
-    
-    def prior_pass(self, h):
-        return self.prior_out(self.prior(h)) + eps
-
-    def predictor_pass(self, z):
-        return self.predictor_out(self.predictor(z))
 # endregion
-        

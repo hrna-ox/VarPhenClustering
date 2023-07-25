@@ -136,7 +136,6 @@ class LSTM_Dec_v1(nn.Module):
         seq_len: int,     # Number of observations to generate
         output_dim: int,   # Dimensionality of output vectors
         hidden_dim: int,  # Dimensionality of hidden state
-        num_layers: int = 1,  # Number of layers (default = 1)
         dropout: float = 0.0, # Dropout rate (default = 0.0, i.e. no dropout)
         **kwargs): 
         """
@@ -149,7 +148,7 @@ class LSTM_Dec_v1(nn.Module):
         # Initialise parameters
         self.seq_len, self.h_dim = seq_len, hidden_dim
         self.i_dim, self.o_dim = output_dim, output_dim        # The output dim must match the input dim for the next time-step
-        self.n_layers, self.dropout = num_layers, dropout
+        self.dropout = dropout
 
         # Define main LSTM layer and output layer
         self.lstm_cell = LSTMCell(input_size=self.i_dim, hidden_size=self.h_dim, bias=True)
