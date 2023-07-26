@@ -23,7 +23,7 @@ def convert_to_npy(*args):
         ValueError: if any args has type different from np.ndarray or torch.Tensor.
 
     Returns:
-        sequence of npy arrays 
+        sequence of npy arrays or 
     """
     for arg in args:
         if isinstance(arg, np.ndarray):
@@ -36,6 +36,28 @@ def convert_to_npy(*args):
             except ValueError:
                 raise ValueError("Argument has to be either np.ndarray or torch.Tensor.")
 
+
+def convert_to_torch(*args):
+    """
+    Convert a sequence of arguments iteratively to torch tensors.
+
+    Raises:
+        ValueError: if any args has type different from np.ndarray or torch.Tensor.
+
+    Returns:
+        sequence of torch tensors.
+    """
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            yield arg
+        elif isinstance(arg, np.ndarray):
+            yield torch.from_numpy(arg)
+        else:
+            try:
+                yield torch.tensor(arg)
+            except ValueError:
+                raise ValueError("Argument has to be either np.ndarray or torch.Tensor.")
+            
 
 def _weighted_averaging(inputs: ARRAY_LIKE, weights: Union[None, ARRAY_LIKE] = None, dim: Union[int, None] = None) -> ARRAY_LIKE:
     """

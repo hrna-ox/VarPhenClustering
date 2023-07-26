@@ -9,25 +9,24 @@ This file implements a logger function to plot and log useful information about 
 
 # region =============== IMPORT LIBRARIES ===============
 import csv
-import itertools
 import os
 import pickle
 import numpy as np
 import pandas as pd
 import torch
 
+import datetime
 from typing import Dict, List, Union
 
 import matplotlib.pyplot as plt
 import wandb
 
-import src.models.DirVRNN.auxiliary_functions as model_utils
 import src.models.loss_functions as LM_utils
 
 # endregion
 
 # ==================== UTILITY FUNCTION ====================
-def _log_new_dir(save_dir: str = "exps/"):
+def _log_new_run_dir(save_dir: str = "exps/"):
     """
     If a save directory is not directly given, estimate a new one based on incremental Run IDs.
 
@@ -39,6 +38,7 @@ def _log_new_dir(save_dir: str = "exps/"):
     """
 
     # Get all directories in save_dir
+    _mkdirs_if_not_exist(save_dir)
     dirs = os.listdir(save_dir)
 
     # Get all Run IDs
@@ -53,7 +53,10 @@ def _log_new_dir(save_dir: str = "exps/"):
     # Create new directory
     new_dir = os.path.join(save_dir, f"Run_{next_run_id}")
 
-    return new_dir
+    # Append time stamp
+    dir_with_tmst = new_dir + "_" + _get_save_timestamp()
+
+    return dir_with_tmst
 
 
 def _mkdirs_if_not_exist(*args):
@@ -68,36 +71,110 @@ def _mkdirs_if_not_exist(*args):
             os.makedirs(_dir)
 
 
-def _logger_make_csv_if_not_exist(save_path: str, header: List = [], objects: List = []):
+def _logger_make_csv_if_not_exist(save_path: str, header: List = []):
     """
-    Create a csv file if it does not exist, and append the header. If file exists, append objects.
+    Create a csv file if it does not exist, and append the header.
 
     Args:
     - save_path: path to save the csv file
     - header: list of strings to append to the header
-    - objects: list of objects to append to the csv file
     """
     if not os.path.exists(save_path):
         with open(save_path, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(header)
         
-    else:
-        with open(save_path, "a", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(objects)
 
 
 def _get_save_timestamp():
     """
     Given the current timestamp, return a string with the format "YYYY-MM-DD_HH-MM-SS" for adding to save paths.
     """
-    import datetime
     now = datetime.datetime.now()
     return now.strftime("%Y-%m-%d_%H-%M-%S")
 
 
 # region =============== MAIN ===============
+
+class DLLogger:
+    """
+    Python Class to log the training, validation and testing of Deep Learning Models. Includes loss tracking and performance metrics.
+    """
+    def __init__(self, save_dir: str, class_names: List = [], K_fold_idx: int = 1, loss_headers: List = []):
+        "Object initialization."
+
+        self.save_dir = save_dir
+        self.class_names = class_names
+        self.K_fold_idx = K_fold_idx
+        self.loss_headers = loss_headers
+
+        # Create Save Folder
+        self.save_dir = os.path.join(_log_new_run_dir(self.save_dir), f"fold_{self.K_fold_idx}")
+        _mkdirs_if_not_exist(self.save_dir)
+        print("Saving Experiment to directory: {}".format(self.save_dir))
+        
+
+    def _init_exp_fds(self, mode: str = "train"):
+        """
+        Initialize the directories to save the outputs of Deep Learning Models (any model with train/val/test split.)
+
+        Args:
+        - mode: str indicating whether the logger is for testing or validation or testing.
+        """
+
+        # Take Subfolder within experiment based on the mode
+        exp_subfd = os.path.join(self.save_dir, mode)
+        _mkdirs_if_not_exist(exp_subfd)
+
+
+        # ====== Create Loss Trackers ======
+        _logger_make_csv_if_not_exist(f"{exp_subfd}/loss_tracker.csv", self.loss_headers)
+
+        # ====== Create Metric Trackers if not training (training only sees data 1 batch at a time) =====
+        if mode != "train":
+                
+            # Initialize Metric Trackers and CSV output file
+            _multiclass_metric_headers = ["epoch"] + self.class_names
+            _logger_make_csv_if_not_exist(f"{exp_subfd}/accuracy_tracker.csv", ["epoch", "accuracy"])
+            _logger_make_csv_if_not_exist(f"{exp_subfd}/recall_tracker.csv", _multiclass_metric_headers)
+            _logger_make_csv_if_not_exist(f"{exp_subfd}/precision_tracker.csv", _multiclass_metric_headers)
+            _logger_make_csv_if_not_exist(f"{exp_subfd}/micro_f1_tracker.csv", _multiclass_metric_headers)
+            _logger_make_csv_if_not_exist(f"{exp_subfd}/macro_f1_tracker.csv", _multiclass_metric_headers)
+            _logger_make_csv_if_not_exist(f"{exp_subfd}/roc_auc_tracker.csv", _multiclass_metric_headers)
+            _logger_make_csv_if_not_exist(f"{exp_subfd}/pr_auc_tracker.csv", _multiclass_metric_headers)
+
+            # Initialize Confusion Matrix Saving
+            _cm_header = ["epoch"] + ["Tr_{i}_Pr_{j}".format(i, j) for j in self.class_names for i in self.class_names]
+            _logger_make_csv_if_not_exist(f"{exp_subfd}/confusion_matrix.csv", _cm_header)
+
+            # Initialize Metric tracker for Clustering Performance
+            _clustering_metric_headers = ["epoch", "ARI", "NMI", "Sil", "CAL", "DBI"]
+            _logger_make_csv_if_not_exist(f"{exp_subfd}/clus_metric_tracker.csv", _clustering_metric_headers)
+
+
+    def log_dirvrnn_losses(self, losses: List, epoch: int = 0, mode: str = "train"):
+        """
+        Log the losses by DIRVRNN model into save directory. 
+
+        Args:
+        - losses: List with loss information
+        - epoch: current epoch for training. This parameter is disregarded if mode is set to 'test'.
+        - mode: str indicating whether the logger is for testing or validation or training.
+        """
+
+        # Add epoch information to losses dictionary at the beginning
+        losses_as_dict = {f"{mode}/{self.loss_headers[i]}": losses[i] for i in range(len(self.loss_headers))}
+
+        # Log to Weights and Biases
+        wandb.log(losses_as_dict, step=epoch + 1)
+
+
+        # Save to CSV file
+        with open(f"{self.save_dir}/{mode}/loss_tracker.csv", "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([epoch] + losses)
+
+
 def logger_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: Union[np.ndarray, torch.Tensor], 
                     save_dir: str = "exps/DirVRNN", epoch: int = 1, class_names: List = []):
     """
@@ -110,40 +187,6 @@ def logger_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: Union[np.
     - epoch: current epoch for training. For testing, it is set to 1.
     - class_names: list of class names for the outcome visualization and analysis
     """
-    if save_dir is not None:
-        assert os.path.exists(save_dir)
-
-    if class_names == []:
-        class_names = [f"C{i}" for i in range(y_true.shape[1])]
-
-    # Compute Supervised Scores
-    scores = LM_utils.get_sup_scores(y_true=y_true, y_pred=y_pred)
-
-    # Unpack Dictionary
-    acc, macro_f1, micro_f1, recall, precision = scores["acc"], scores["macro_f1"], scores["micro_f1"], scores["recall"], scores["precision"]
-    roc_auc, pr_auc = scores["roc_auc"], scores["pr_auc"]
-    conf_mat = scores["conf_matrix"]
-
-    # Save to file using csv writer
-    _logger_make_if_not_exist(save_path=os.path.join(save_dir, "sup_scores.csv"), 
-                            header=["epoch", "acc", "macro_f1", "micro_f1", "recall", "precision"], 
-                            objects=[epoch, acc, macro_f1, micro_f1, recall, precision])
-
-    # Save ROC and PR Scores per class
-    header = ["epoch"] + [f"ROC_{_cl}" for _cl in class_names] + [f"PR_{_cl}" for _cl in class_names]
-    _logger_make_if_not_exist(save_path=os.path.join(save_dir, "auc_scores.csv"),
-                            header = header,
-                            objects = [epoch, *roc_auc, *pr_auc])
-
-
-    # Save Confusion Matrix
-    header = ["epoch"]
-    for true_cl, pred_cl in itertools.product(class_names, repeat=2):      # Iterate over pairs of class names, ordered by the first
-        header.append(f"T{true_cl}-F{pred_cl}")
-    
-    _logger_make_if_not_exist(save_path=os.path.join(save_dir, "confusion_matrix.csv"),
-                            header = header,
-                            objects = [epoch, *conf_mat.reshape(-1)])
     
 
 def logger(model_params: Dict, X: torch.Tensor, y: torch.Tensor, log:Dict, epoch: int = 0, mode: str = "val", outcomes: List = [], features: List = [], save_dir: str = "exps/Dir_VRNN/"):
