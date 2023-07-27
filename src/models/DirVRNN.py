@@ -2,25 +2,22 @@
 Author: Henrique Aguiar
 Contact: henrique.aguiar@eng.ox.ac.uk
 
-This file defines the main proposed model, and how to train the model
+This file defines the main proposed model, and how to train the model.
 """
 
 # ============= IMPORT LIBRARIES ==============
-import csv
-import os
-import pickle
 import torch
 import torch.nn as nn
 import wandb
 
-from typing import Tuple, Dict, Union, List
+from typing import Dict, Union
 from torch.utils.data import DataLoader, TensorDataset
 
 import src.models.loss_functions as LM_utils
-from src.models.deep_learning_base_classes import MLP, LSTM_Dec_v1, LSTM_Dec_v2
+from src.models.deep_learning_base_classes import MLP, LSTM_Dec_v1
 
 import src.models.model_utils as model_utils
-from src.models.logging_utils import DLLogger as logger
+from src.models.logging_utils import DirVRNNLogger as logger
 import src.models.metrics as metrics
 
 
@@ -486,20 +483,16 @@ class DirVRNN(nn.Module):
 
         # Define optimizer and Logging of weights
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        wandb.watch(models=self, log="all", log_freq=1, idx=K_fold_idx)
-
-        # dictionary to save objects for logging
-        _exp_objects_saver = {}                
+        wandb.watch(models=self, log="all", log_freq=1, idx=K_fold_idx)           
 
         # Initialize logger object
         exp_save_dir = f"exps/DirVRNN"
-        log = logger(save_dir=exp_save_dir, class_names=class_names, K_fold_idx=K_fold_idx, loss_headers=["loss", "loss_kl", "loss_loglik", "loss_out"])
-        log._init_exp_fds(mode="train")
-
-        if val_data is not None:
-            log._init_exp_fds(mode="val")
-
-
+        log = logger(
+            save_dir=exp_save_dir, 
+            class_names=class_names, 
+            K_fold_idx=K_fold_idx, 
+            loss_headers=["loss", "loss_loglik", "loss_kl", "loss_out"]
+        )
 
         # ================== TRAINING-VALIDATION LOOP ==================
         for epoch in range(1, num_epochs + 1):
@@ -549,7 +542,7 @@ class DirVRNN(nn.Module):
 
 
             # ============== LOGGING ==============
-            log.log_dirvrnn_losses(losses=[ep_loss, ep_kl, ep_loglik, ep_outl], epoch=epoch, mode="train")
+            log.log_losses(losses=[ep_loss, ep_kl, ep_loglik, ep_outl], epoch=epoch, mode="train")
 
 
             # ============= VALIDATION =============
@@ -588,186 +581,128 @@ class DirVRNN(nn.Module):
 
                         # Compute performance scores
                         history_sup_scores = metrics.get_sup_scores(y_true=y, y_pred=y_pred, run_weight_algo=False)
-                        add_append_path_to_different_objects
+                        history_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=clus_pred)
+                        history_clus_qual_scores = metrics.get_unsup_scores(X=z_est, clus_pred=clus_pred, seed=self.seed)
+
+                        # Combine cluster label and cluster quality scores into single dictionary
+                        history_clus_scores = {**history_clus_label_scores, **history_clus_qual_scores}
+                        
 
                         # ================== LOGGING ==================
-                        log.log_dirvrnn_losses(losses=[val_loss, val_kl, val_loglik, val_outl], epoch=epoch, mode="val")
+                        log.log_losses(losses=[val_loss, val_kl, val_loglik, val_outl], epoch=epoch, mode="val")
+                        log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores, mode="val")
+                        log.log_clustering_performance(iter=epoch, scores_dic=history_clus_scores)
+
+            # TO DO 
+            # SAVE MODEL
+            # AT THE END OF EACH EPOCh
+            # SIMILARLY
+            # WITH ANY INTERMEDIARY PRODUCTS
 
 
-                        
-                # logger(model_params=model_params, X=X, y=y,
-                #    log=history_objects,
-                #    epoch=epoch, mode="val",
-                #    outcomes=outcomes, features=features, save_dir=save_dir
-                # )
 
-        # At the end of training, save the data and the final outputs
-        history_objects["X_train"] = X_train
-        history_objects["y_train"] = y_train
 
-        # Save to pickle
-        with open(f"{train_fd}/train_outputs.pkl", "wb") as f:
-            pickle.dump(history_objects, f)
 
-        # Do the same for validation data
-        outputs_val["X_val"] = X_val
-        outputs_val["y_val"] = y_val
+        # Save Training and Validation Outputs
+        save_objects = {
+            "train_data": train_data,
+            "val_data": val_data,
+            "fit_params": {
+                "num_epochs": num_epochs,
+                "batch_size": batch_size,
+                "lr": lr
+            },
+            "model_params": self.state_dict()
+        }              
+        log.log_objects(objects=save_objects, save_name="experiment_config")
 
-        # Save to pickle
-        with open(f"{val_fd}/val_outputs.pkl", "wb") as f:
-            pickle.dump(outputs_val, f)
-
-    def _eval(self, X, y, epoch: int, viz_params: Dict):
-        """
-        Compute Performance on Val Dataset.
-
-        Params:
-            - X: input data of shape (bs, T, input_size)
-            - y: outcome data of shape (bs, output_size)
-            - epoch: int indicating epoch number
-            - viz_params: dictionary containing visualization parameters for better saving. If None, then standard placeholders are used.
-                - save_dir: directory to save results
-                - fold: fold number
-                - features: list of feature names
-                - outcomes: list of outcome names
-        """
-        if X is None or y is None:
-            return None, {}
-
-        # Unpack viz params
-        val_fd = f"{viz_params['save_dir']}/val"
-        features = viz_params["features"]
-        outcomes = viz_params["outcomes"]
-
-        # Set model to evaluation mode
-        self.eval()
-
-        # Prepare Data
-        val_data = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
-        val_loader = DataLoader(val_data, batch_size=X.shape[0], shuffle=False)
-
-        # Apply forward prediction
-        with torch.inference_mode():
-            for X, y in val_loader:
-                # Run model once through the
-                val_loss, history_objects = self.forward(X, y, mode="eval")
-
-                # Load individual Losses from tracker
-                log_lik = torch.sum(history_objects["loss_loglik"])
-                kl_div = torch.sum(history_objects["loss_kl"])
-                out_l = history_objects["loss_out"]
-
-                # Log Losses
-                wandb.log(
-                    {
-                        "val/epoch": epoch + 1,
-                        "val/loss": val_loss,
-                        "val/loglik": log_lik,
-                        "val/kldiv": kl_div,
-                        "val/out_l": out_l,
-                    },
-                    step=epoch + 1,
-                )
-
-                # Print message
-                print(
-                    "Val epoch {} ({:.0f}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - out {:.2f}]".format(
-                        epoch,
-                        100,
-                        val_loss.item(),
-                        log_lik.item(),
-                        kl_div.item(),
-                        out_l.item(),
-                    )
-                )
-
-                # Save to CSV file
-                with open(f"{val_fd}/val_losses.csv", "a", newline="") as f:
-                    writer = csv.writer(f)
-                    writer.writerow(
-                        [
-                            epoch,
-                            val_loss.item(),
-                            kl_div.item(),
-                            log_lik.item(),
-                            out_l.item(),
-                        ]
-                    )
-
-                # Log performance evaluation scores
-                logger.logger_sup_scores(
-                    y_true=y,
-                    y_pred=history_objects["y_pred"],
-                    save_dir=val_fd,
-                    epoch=epoch,
-                    class_names=outcomes,
-                )
-
-                # Log clustering evaluation scores
-
-                # Log more complex results
-                model_params = {
-                    "c_means": self.c_means,
-                    "log_c_vars": self.log_c_vars,
-                    "seed": self.seed,
-                }
-
-                # logger(model_params=model_params, X=X, y=y,
-                #    log=history_objects,
-                #    epoch=epoch, mode="val",
-                #    outcomes=outcomes, features=features, save_dir=save_dir
-                # )
-
-                return val_loss, history_objects
-
-    def predict(
-        self,
-        X,
-        y,
-        run_config: Union[Dict, None] = None,
-        class_names: List = [],
-        feat_names: List = [],
-        save_dir: Union[str, None] = None,
-    ):
+    def predict(self, X, y, save_params: Union[None, Dict] = None):
         """Similar to forward method, but focus on inner computations and tracking objects for the model."""
 
-        # Set model to evaluation mode
-        self.eval()
+        # ================== DATA PREPARATION ==================
+
+        # Unpack Save Parameters
+        if save_params is not None:
+            class_names = save_params["class_names"]
+            K_fold_idx = save_params["K_fold_idx"]
+        
+        else:
+            class_names = [f"class_{i}" for i in range(self.num_classes)]
+            K_fold_idx = 1
 
         # Prepare Data
         test_data = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
         test_loader = DataLoader(test_data, batch_size=X.shape[0], shuffle=False)
 
+        # Initialize logger objects
+        exp_save_dir = f"exps/DirVRNN"
+        log = logger(
+            save_dir=exp_save_dir, 
+            class_names=class_names, 
+            K_fold_idx=K_fold_idx, 
+            loss_headers=["loss", "loss_loglik", "loss_kl", "loss_out"]
+        )
+        wandb.watch(models=self, log="all", log_freq=1, idx=K_fold_idx)           
+
+        # Set model to evaluation mode
+        self.eval()
+
         # Apply forward prediction
         with torch.inference_mode():
             for X, y in test_loader:
+
                 # Pass data through model
-                _, history_objects = self.forward(X, y)  # Run forward pass
+                test_loss, test_loglik, test_kl, test_outl, test_history, test_future = self.forward(X, y, mode="eval")
 
-                # Log results
-                if save_dir is not None:
-                    model_params = {
-                        "c_means": self.c_means,
-                        "log_c_vars": self.log_c_vars,
-                        "seed": self.seed,
-                    }
+                # ============= SCORE COMPUTATION =============
 
-                    logger(
-                        model_params=model_params,
-                        X=X,
-                        y=y,
-                        log=history_objects,
-                        epoch=0,
-                        mode="test",
-                        class_names=class_names,
-                        feat_names=feat_names,
-                        save_dir=save_dir,
-                    )
+                # Unpack outputs
+                past_y_pred = test_history["y_pred"]
+                past_clus_pred = test_history["pis"]
+                past_z_est = test_history["zs"]
 
-                # Append Test data
-                history_objects["X_test"] = X
-                history_objects["y_test"] = y
-                history_objects["run_config"] = run_config
+                # Compute performance scores
+                history_sup_scores = metrics.get_sup_scores(y_true=y, y_pred=past_y_pred, run_weight_algo=False)
+                history_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=past_clus_pred)
+                history_clus_qual_scores = metrics.get_unsup_scores(X=past_z_est, clus_pred=cpast_lus_pred, seed=self.seed)
 
-                return history_objects
+                # Combine cluster label and cluster quality scores into single dictionary
+                history_clus_scores = {**history_clus_label_scores, **history_clus_qual_scores}
+                
+                # Do the same for future computations
+                future_y_pred = test_future["y_pred"]
+                future_clus_pred = test_future["pis"]
+                future_z_est = test_future["zs"]
+
+                # Compute performance scores
+                future_sup_scores = metrics.get_sup_scores(y_true=y, y_pred=future_y_pred, run_weight_algo=False)
+                future_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=future_clus_pred)
+                future_clus_qual_scores = metrics.get_unsup_scores(X=future_z_est, clus_pred=future_clus_pred, seed=self.seed)
+
+                # Combine cluster label and cluster quality scores into single dictionary
+                future_clus_scores = {**future_clus_label_scores, **future_clus_qual_scores}
+
+                # ================== LOGGING ==================
+                log.log_losses(losses=[test_loss, test_loglik, test_kl, test_outl], epoch="test", mode="test")
+                log.log_supervised_performance(iter="test", scores_dic=history_sup_scores, mode="test/history")
+                log.log_clustering_performance(iter="test", scores_dic=history_clus_scores, mode="test/history")
+
+                # Log future scores as well
+                log.log_supervised_performance(iter="test", scores_dic=future_sup_scores, mode="test/future")
+                log.log_clustering_performance(iter="test", scores_dic=future_clus_scores, mode="test/future")
+        
+        # Log model params, model and other objects
+        save_objects = {
+            "test_data": (X, y),
+            "clus_params": {
+                "c_means": self.c_means,
+                "log_c_vars": self.log_c_vars
+            
+            "model_params": self.state_dict()
+            "save_params": save_params
+        }
+
+        log.log_objects(objects=save_objects, save_name="test_output")
+
+        return 
 # endregion
