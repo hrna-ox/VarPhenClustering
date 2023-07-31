@@ -19,31 +19,98 @@ import utils_general as utils
 eps = 1e-8
 
 
-def _convert_to_labels_if_score(*args):
+# ========================== UTILITY FUNCTIONS ==========================
+def _convert_to_labels_if_score(*args) -> List:
     """
     Iteratively convert predictions/one-hot encoded outcomes to labels.
     """
+    output = []
 
+    # Iterate through each argument
     for arg in args:
 
         if arg.ndim == 1:           # Argument already is converted to labels
-            yield arg.astype(int)
+            output.append(arg.astype(int))
         elif arg.ndim >= 2:
-            yield np.argmax(arg, axis=-1).astype(int)
+            output.append(np.argmax(arg, axis=-1).astype(int))
+
+    return output
 
 
-def _convert_prob_to_score(*args):
+def _convert_prob_to_score(*args) -> List:
     """
     Iteratively convert probability predictions to score values using the x / 1 - x conversion.
     """
+    output = []
 
+    # Iterate through each argument
     for arg in args:
         if isinstance(arg, np.ndarray):
-            yield np.divide(arg, 1 - arg + eps)
+            output.append(np.divide(arg, 1 - arg + eps))
 
         elif isinstance(arg, torch.Tensor):
-            yield torch.divide(arg, 1 - arg + eps)
+            output.append(torch.divide(arg, 1 - arg + eps))
 
+    return output
+
+
+
+
+def lachiche_flach_algorithm(y_true: np.ndarray, y_pred: np.ndarray) -> List[float]:
+    """
+    Compute the Lachiche Flach Algorithm given input multiclass true outcomes, y_true, and predicted outcomes, y_pred.
+
+    The algorithm estimates weights w_1, ..., w_O, where O is the number of classes, such that the assignment of predicted probabilities to a single class is optimal
+    with regard to F1.
+
+    Args:
+        y_true (np.ndarray): (N, O) array of one-hot encoded outcomes.
+        y_pred (np.ndarray): (N, O) array of outcome probability predictions.
+
+    Returns:
+        weights (List of floats): (O, ) array of weights to maximize F1 score.
+    """
+
+    # Convert predictions to scores
+    if np.all(y_pred <= 1):
+        y_pred_score = _convert_prob_to_score(y_pred)
+    else:
+        y_pred_score = y_pred
+
+    # Get some useful variables
+    num_samples, num_classes = y_true.shape
+    samples_per_class = np.sum(y_true, axis=0)
+    _class_order_by_size = np.argsort(samples_per_class)[::-1]         # Order classes by number of samples, largest to smallest
+
+    # Initialize weights
+    weights = np.zeros(num_classes)
+
+    # Loop through each class by decreasing number of samples, and determine best weight through 2-way comparison
+    weights[0] = 1
+    for class_idx in _class_order_by_size[1:]:
+
+        # Initialize instance tracker and classes that have been seen previously
+        I = []
+        seen_classes = _class_order_by_size[:class_idx]
+        weights_seen_classes = weights[seen_classes]
+
+        # Estimate the estimates for each instance subsetted to previously seen classes
+        _weighted_score_estimates_seen_classes = weights_seen_classes.reshape(1, -1) * y_pred_score[:, seen_classes] 
+
+        # Compute most likely class and maximum weighted score for each instance based on seen classes only
+        _maximum_weighted_score = np.max(_weighted_score_estimates_seen_classes, axis=1)
+        _maximum_score_class = np.argmax(_weighted_score_estimates_seen_classes, axis=1)
+
+        # Compute ratio between score for current class and maximum weighted score
+        _score_ratio = y_pred_score[:, class_idx] / _maximum_weighted_score
+
+        # Compute weight based on two class analysis
+        weight_cur_class = _lachiche_flach_find_best_weight(y_true, _score_ratio, class_idx=class_idx)
+
+        # Loop through each instance to estimate the best likely estimate based on previously seen classes
+        for instance_idx in range(num_samples):
+            
+            
 
 # =========================== Supervised Metrics ===========================
 
@@ -364,9 +431,17 @@ def get_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray):
     return confusion_matrix
 
     
-def get_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: Union[np.ndarray, torch.Tensor]):
+def get_multiclass_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: Union[np.ndarray, torch.Tensor], run_weight_algo: bool = False):
     """
     Compute all supervised scores between true outcomes y_true, and predicted values y_pred.    
+
+    Params:
+    - y_true: torch.Tensor or np.ndarray of true outcomes with shape (N, O).
+    - y_pred: torch.Tensor or np.ndarray of predicted outcomes with shape (N, O). Row sums to 1.
+    - run_weight_algo: bool indicating whether to run the weighted algorithm for scoring and outcome assignment. Defaults to False.
+
+    Returns:
+    - Dictionary of scores.
     """
 
     # Convert arrays, if needed
@@ -381,6 +456,10 @@ def get_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: Union[np.nda
     else:
         raise ValueError("y_true and y_pred must both be either np.ndarray or torch.Tensor")
 
+
+    if run_weight_algo:
+        y_true_npy, y_pred_npy, weights = lachiche_flach_algorithm(y_true_npy, y_pred_npy, return_weights=True)
+        y_true_torch, y_pred_torch = utils.convert_to_torch(y_true_npy, y_pred_npy)
 
     # Compute scores for confusion matrix
     acc = accuracy(y_true_npy, y_pred_npy)

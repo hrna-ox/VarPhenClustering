@@ -662,9 +662,9 @@ class DirVRNN(nn.Module):
                 past_z_est = test_history["zs"]
 
                 # Compute performance scores
-                history_sup_scores = metrics.get_sup_scores(y_true=y, y_pred=past_y_pred, run_weight_algo=False)
+                history_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=past_y_pred, run_weight_algo=False)
                 history_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=past_clus_pred)
-                history_clus_qual_scores = metrics.get_unsup_scores(X=past_z_est, clus_pred=cpast_lus_pred, seed=self.seed)
+                history_clus_qual_scores = metrics.get_unsup_scores(X=past_z_est, clus_pred=past_clus_pred, seed=self.seed)
 
                 # Combine cluster label and cluster quality scores into single dictionary
                 history_clus_scores = {**history_clus_label_scores, **history_clus_qual_scores}
@@ -675,7 +675,7 @@ class DirVRNN(nn.Module):
                 future_z_est = test_future["zs"]
 
                 # Compute performance scores
-                future_sup_scores = metrics.get_sup_scores(y_true=y, y_pred=future_y_pred, run_weight_algo=False)
+                future_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=future_y_pred, run_weight_algo=False)
                 future_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=future_clus_pred)
                 future_clus_qual_scores = metrics.get_unsup_scores(X=future_z_est, clus_pred=future_clus_pred, seed=self.seed)
 
@@ -697,8 +697,8 @@ class DirVRNN(nn.Module):
             "clus_params": {
                 "c_means": self.c_means,
                 "log_c_vars": self.log_c_vars
-            
-            "model_params": self.state_dict()
+            },
+            "model_params": self.state_dict(),
             "save_params": save_params
         }
 
