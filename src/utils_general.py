@@ -13,6 +13,7 @@ import numpy as np
 
 ARRAY_LIKE = Union[List[float], np.ndarray, torch.Tensor]
 
+eps = 1e-8
 
 # ============= Define Utility Functions =============
 def convert_to_npy(*args):
@@ -58,6 +59,49 @@ def convert_to_torch(*args):
             except ValueError:
                 raise ValueError("Argument has to be either np.ndarray or torch.Tensor.")
             
+
+def _convert_to_labels_if_score(x: np.ndarray) -> np.ndarray:
+    """
+    Convert predictions/one-hot encoded outcomes to labels.
+    """
+
+    if x.ndim == 1:           # Argument already is converted to labels
+        return x.astype(int)
+    elif x.ndim >= 2:
+        return np.argmax(x, axis=-1).astype(int)
+    else:
+        raise ValueError("Input array has to be 1D or 2D. Got {}D.".format(x.ndim))
+
+
+def _convert_prob_to_score(x: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+    """
+    Convert probability predictions to score values using the x / 1 - x conversion.
+
+    Args: 
+        - x (np.ndarray or torch.Tensor): array of probability values between 0 and 1.
+    """
+    if isinstance(x, np.ndarray):
+        return np.divide(x, 1 - x + eps)
+
+    elif isinstance(x, torch.Tensor):
+        return torch.divide(x, 1 - x + eps)
+
+
+
+def _convert_scores_to_prob(x: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+    """
+    Convert score predictions to probability values using the x / 1 + x conversion.
+
+    Args:
+        - x (np.ndarray or torch.Tensor): array of score values > 0
+    """
+
+    if isinstance(x, np.ndarray):
+        return np.divide(x, 1 + x + eps)
+    elif isinstance(x, torch.Tensor):
+        return torch.divide(x, 1 + x + eps)
+
+
 
 def _weighted_averaging(inputs: ARRAY_LIKE, weights: Union[None, ARRAY_LIKE] = None, dim: Union[int, None] = None) -> ARRAY_LIKE:
     """

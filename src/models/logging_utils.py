@@ -169,14 +169,14 @@ class ClassifierLogger(BaseLogger):
         super().__init__(*args, **kwargs)
 
         # Initialize supervised score trackers
-        self._init_supervised_score_trackers(mode="train")
-        self._init_supervised_score_trackers(mode="test")
+        self._init_supervised_score_trackers(subdir="train")
+        self._init_supervised_score_trackers(subdir="test")
     
-    def _init_supervised_score_trackers(self, mode: str = "train"):
+    def _init_supervised_score_trackers(self, subdir: str = "train"):
         "Initialize tracker for supervised scores."
 
         # Create CSV for accuracy
-        accuracy_csv_path = f"{self.exp_save_dir}/{mode}/accuracy.csv"
+        accuracy_csv_path = f"{self.exp_save_dir}/{subdir}/accuracy.csv"
         accuracy_csv_header = ["iter", "accuracy"]
         _make_csv_if_not_exist(accuracy_csv_path, accuracy_csv_header)
 
@@ -184,27 +184,27 @@ class ClassifierLogger(BaseLogger):
         multiclass_header = ["iter"] + self.class_names
 
         for metric in CLASS_METRICS:
-            csv_path = f"{self.exp_save_dir}/{mode}/{metric}.csv"
+            csv_path = f"{self.exp_save_dir}/{subdir}/{metric}.csv"
             _make_csv_if_not_exist(csv_path, multiclass_header)
 
         # Create CSV for confusion matrix
         _cm_header = ["iter"] + ["Tr_{i}_Pr_{j}".format(i, j) for j in self.class_names for i in self.class_names]
-        _cm_path = f"{self.exp_save_dir}/{mode}/confusion_matrix.csv"
+        _cm_path = f"{self.exp_save_dir}/{subdir}/confusion_matrix.csv"
         _make_csv_if_not_exist(_cm_path, _cm_header)
 
 
-    def log_supervised_performance(self, iter: Union[str, int] = 1, scores_dic: Dict = {}, mode: str = "train"):
+    def log_supervised_performance(self, iter: Union[str, int] = 1, scores_dic: Dict = {}, subdir: str = "train"):
         """
         Log the supervised performance of the model.
 
         Args:
         - iter: int indicating the current iteration (default = 1)
         - scores_dic: dictionary containing the scores for the different classes.
-        - mode: str indicating whether the logger is for testing or validation or testing.
+        - subdir: str indicating whether the subfolder used for the logger in testing or validation or testing.
         """
 
         # Get Subfolder within experiment based on the mode
-        cur_save_fd = os.path.join(self.exp_save_dir, f"/{mode}")
+        cur_save_fd = os.path.join(self.exp_save_dir, f"/{subdir}")
 
         # Log accuracy
         if "accuracy" in scores_dic.keys():
@@ -233,11 +233,11 @@ class ClusteringLogger(BaseLogger):
         super().__init__(*args, **kwargs)
 
         # Initialize unsupervised score trackers
-        self._init_unsupervised_score_trackers(mode="train")
-        self._init_unsupervised_score_trackers(mode="test")
+        self._init_unsupervised_score_trackers(subdir="train")
+        self._init_unsupervised_score_trackers(subdir="test")
 
 
-    def _init_unsupervised_score_trackers(self, mode: str = "train"):
+    def _init_unsupervised_score_trackers(self, subdir: str = "train"):
         "Initialize tracker for unsupervised scores."
 
 
@@ -246,11 +246,11 @@ class ClusteringLogger(BaseLogger):
 
             # Create CSV for any metrics related to cluster labels and ground truth labels (classes)
             _clus_label_match_score_csv_header = ["iter"] + CLUS_LABEL_MATCH_METRICS
-            _make_csv_if_not_exist(f"{self.exp_save_dir}/{mode}/cluster_label_match_scores.csv", _clus_label_match_score_csv_header)
+            _make_csv_if_not_exist(f"{self.exp_save_dir}/{subdir}/cluster_label_match_scores.csv", _clus_label_match_score_csv_header)
 
             # Create CSV for Silhouette, Calinski Harabasz, Davies Bouldin
             _clus_quality_score_csv_header = ["iter"] + CLUS_QUALITY_METRICS
-            _make_csv_if_not_exist(f"{self.exp_save_dir}/{mode}/cluster_quality_scores.csv", _clus_quality_score_csv_header)
+            _make_csv_if_not_exist(f"{self.exp_save_dir}/{subdir}/cluster_quality_scores.csv", _clus_quality_score_csv_header)
 
         
         # If clustering is temporal then create separate CSVs for each metric
@@ -261,22 +261,22 @@ class ClusteringLogger(BaseLogger):
             for metric in CLUS_LABEL_MATCH_METRICS + CLUS_QUALITY_METRICS:
                 
                 # Create CSV
-                _make_csv_if_not_exist(f"{self.exp_save_dir}/{mode}/{metric}.csv", _temporal_header)
+                _make_csv_if_not_exist(f"{self.exp_save_dir}/{subdir}/{metric}.csv", _temporal_header)
 
 
-    def log_clustering_performance(self, iter: Union[str, int] = 1, scores_dic: Dict = {}, mode: str = "train", temporal: bool = False):
+    def log_clustering_performance(self, iter: Union[str, int] = 1, scores_dic: Dict = {}, subdir: str = "train", temporal: bool = False):
         """
         Log the clustering performance of the model.
 
         Args:
         - iter: int indicating the current iteration (default = 1)
         - scores_dic: dictionary containing the scores for the different classes.
-        - mode: str indicating whether the logger is for testing or validation or testing.
+        - subdir: str indicating whether the subdir the logger is for testing or validation or testing.
         - temporal: bool indicating whether the clustering is assumed to be temporal or not.
         """
 
         # Get Subfolder within experiment based on the mode
-        cur_save_fd = os.path.join(self.exp_save_dir, f"/{mode}")
+        cur_save_fd = os.path.join(self.exp_save_dir, f"/{subdir}")
 
         # If clustering is not temporal then combine metrics into single CSV
         if not self._clus_is_temp:
@@ -322,37 +322,37 @@ class DLLogger(BaseLogger):
         self.__make_save_subfolder("val")
 
         # Initialize loss trackers
-        self._init_loss_trackers(mode="train")
-        self._init_loss_trackers(mode="val")
-        self._init_loss_trackers(mode="test")
+        self._init_loss_trackers(subdir="train")
+        self._init_loss_trackers(subdir="val")
+        self._init_loss_trackers(subdir="test")
 
-    def _init_loss_trackers(self, mode: str = "train"):
+    def _init_loss_trackers(self, subdir: str = "train"):
         "Initialize tracker for losses."
 
         # Create CSV for losses
         _loss_csv_header = ["epoch"] + self.loss_names
-        _make_csv_if_not_exist(f"{self.exp_save_dir}/{mode}/loss_tracker.csv", _loss_csv_header)
+        _make_csv_if_not_exist(f"{self.exp_save_dir}/{subdir}/loss_tracker.csv", _loss_csv_header)
 
 
-    def log_losses(self, losses: List, epoch: Union[str, int] = 1, mode: str = "train"):
+    def log_losses(self, losses: List, epoch: Union[str, int] = 1, subdir: str = "train"):
         """
         Log the losses by deep learning model into save directory. 
 
         Args:
         - losses: List with loss information
         - epoch: current epoch for training. This parameter is disregarded if mode is set to 'test'.
-        - mode: str indicating whether the logger is for testing or validation or training.
+        - subdir: str indicating the subdir the logger is for testing or validation or training.
         """
 
         # Add epoch information to losses dictionary at the beginning
-        losses_as_dict = {f"{mode}/{self.loss_names[i]}": losses[i] for i in range(len(self.loss_names))}
+        losses_as_dict = {f"{subdir}/{self.loss_names[i]}": losses[i] for i in range(len(self.loss_names))}
 
         # Log to Weights and Biases
         wandb.log(losses_as_dict, step=epoch)
 
 
         # Save to CSV file
-        _write_to_csv_if_exists(f"{self.exp_save_dir}/{mode}/loss_tracker.csv", [epoch] + losses)
+        _write_to_csv_if_exists(f"{self.exp_save_dir}/{subdir}/loss_tracker.csv", [epoch] + losses)
 
 
 # ============================= Logger for Particular Models =============================

@@ -542,7 +542,7 @@ class DirVRNN(nn.Module):
 
 
             # ============== LOGGING ==============
-            log.log_losses(losses=[ep_loss, ep_kl, ep_loglik, ep_outl], epoch=epoch, mode="train")
+            log.log_losses(losses=[ep_loss, ep_kl, ep_loglik, ep_outl], epoch=epoch, subdir="train")
 
 
             # ============= VALIDATION =============
@@ -580,18 +580,21 @@ class DirVRNN(nn.Module):
                         z_est = val_history["zs"]
 
                         # Compute performance scores
-                        history_sup_scores = metrics.get_sup_scores(y_true=y, y_pred=y_pred, run_weight_algo=False)
+                        history_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=y_pred, run_weight_algo=False)
+                        history_sup_scores_lachiche_algo = metrics.get_multiclass_sup_scores(y_true=y, y_pred=y_pred, run_weight_algo=True)
                         history_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=clus_pred)
                         history_clus_qual_scores = metrics.get_unsup_scores(X=z_est, clus_pred=clus_pred, seed=self.seed)
 
                         # Combine cluster label and cluster quality scores into single dictionary
                         history_clus_scores = {**history_clus_label_scores, **history_clus_qual_scores}
+
                         
 
                         # ================== LOGGING ==================
-                        log.log_losses(losses=[val_loss, val_kl, val_loglik, val_outl], epoch=epoch, mode="val")
-                        log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores, mode="val")
-                        log.log_clustering_performance(iter=epoch, scores_dic=history_clus_scores)
+                        log.log_losses(losses=[val_loss, val_kl, val_loglik, val_outl], epoch=epoch, subdir="val/losses")
+                        log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores, subdir="val/supervised_scores")
+                        log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores_lachiche_algo, subdir="val/supervised_scores_lachiche_algo")
+                        log.log_clustering_performance(iter=epoch, scores_dic=history_clus_scores, subdir="val/unsupervised_scores")
 
             # TO DO 
             # SAVE MODEL
@@ -663,6 +666,7 @@ class DirVRNN(nn.Module):
 
                 # Compute performance scores
                 history_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=past_y_pred, run_weight_algo=False)
+                history_sup_scores_lachiche_algo = metrics.get_multiclass_sup_scores(y_true=y, y_pred=past_y_pred, run_weight_algo=True)
                 history_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=past_clus_pred)
                 history_clus_qual_scores = metrics.get_unsup_scores(X=past_z_est, clus_pred=past_clus_pred, seed=self.seed)
 
@@ -676,6 +680,7 @@ class DirVRNN(nn.Module):
 
                 # Compute performance scores
                 future_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=future_y_pred, run_weight_algo=False)
+                future_sup_scores_lachiche_algo = metrics.get_multiclass_sup_scores(y_true=y, y_pred=future_y_pred, run_weight_algo=True)
                 future_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=future_clus_pred)
                 future_clus_qual_scores = metrics.get_unsup_scores(X=future_z_est, clus_pred=future_clus_pred, seed=self.seed)
 
@@ -683,13 +688,15 @@ class DirVRNN(nn.Module):
                 future_clus_scores = {**future_clus_label_scores, **future_clus_qual_scores}
 
                 # ================== LOGGING ==================
-                log.log_losses(losses=[test_loss, test_loglik, test_kl, test_outl], epoch="test", mode="test")
-                log.log_supervised_performance(iter="test", scores_dic=history_sup_scores, mode="test/history")
-                log.log_clustering_performance(iter="test", scores_dic=history_clus_scores, mode="test/history")
+                log.log_losses(losses=[test_loss, test_loglik, test_kl, test_outl], epoch="test", subdir="test/losses")
+                log.log_supervised_performance(iter="test", scores_dic=history_sup_scores, subdir="test/history/supervised_scores")
+                log.log_supervised_performance(iter="test", scores_dic=history_sup_scores_lachiche_algo, subdir="test/future/supervised_scores_lachiche_algo")
+                log.log_clustering_performance(iter="test", scores_dic=history_clus_scores, subdir="test/history/unsupervised_scores")
 
                 # Log future scores as well
-                log.log_supervised_performance(iter="test", scores_dic=future_sup_scores, mode="test/future")
-                log.log_clustering_performance(iter="test", scores_dic=future_clus_scores, mode="test/future")
+                log.log_supervised_performance(iter="test", scores_dic=future_sup_scores, subdir="test/future/supervised_scores")
+                log.log_supervised_performance(iter="test", scores_dic=future_sup_scores_lachiche_algo, subdir="test/future/supervised_scores_lachiche_algo")
+                log.log_clustering_performance(iter="test", scores_dic=future_clus_scores, subdir="test/future/unsupervised_scores")
         
         # Log model params, model and other objects
         save_objects = {

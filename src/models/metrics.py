@@ -20,43 +20,48 @@ eps = 1e-8
 
 
 # ========================== UTILITY FUNCTIONS ==========================
-def _convert_to_labels_if_score(*args) -> List:
+
+
+def _get_weight_F1_maximizer(y_true: np.ndarray, class_ratios: np.ndarray) -> float:
     """
-    Iteratively convert predictions/one-hot encoded outcomes to labels.
+    Compute the weight for a given class that maximizes the F1 score.
+
+    Args:
+        y_true (np.ndarray): (N, ) 0-1 array indicating which instances satisfy target outcome.
+        class_ratios (np.ndarray): (N, ) array of ratios between the score for the current class and the maximum score across all other classes. In the binary case, 
+        this is the regular target class score.
+
+    Returns:
+        weight (float): weight that maximizes F1 score when calling class_ratios >= weight for a positive target.
     """
-    output = []
 
-    # Iterate through each argument
-    for arg in args:
+    # Initialization 
+    _sort_ratios = np.sort(class_ratios)
+    optimum = 0.0
+    best_threshold = _sort_ratios[0]
 
-        if arg.ndim == 1:           # Argument already is converted to labels
-            output.append(arg.astype(int))
-        elif arg.ndim >= 2:
-            output.append(np.argmax(arg, axis=-1).astype(int))
+    # Iterate through each possible threshold (effictively the possible scores weights)
+    for threshold in range(1, _sort_ratios.size):
 
-    return output
+        # Get threshold value
+        cur_threshold = _sort_ratios[threshold]
 
+        # Compute F1 score
+        label_pred = (class_ratios >= cur_threshold).astype(int)
+        cur_f1 = f1_binary(label_true=y_true, label_pred=label_pred)
 
-def _convert_prob_to_score(*args) -> List:
-    """
-    Iteratively convert probability predictions to score values using the x / 1 - x conversion.
-    """
-    output = []
+        # Update optimum if necessary
+        if cur_f1 > optimum:
 
-    # Iterate through each argument
-    for arg in args:
-        if isinstance(arg, np.ndarray):
-            output.append(np.divide(arg, 1 - arg + eps))
-
-        elif isinstance(arg, torch.Tensor):
-            output.append(torch.divide(arg, 1 - arg + eps))
-
-    return output
+            optimum = cur_f1
+            best_threshold = cur_threshold
+        
+        
+    # Return best threshold
+    return best_threshold
 
 
-
-
-def lachiche_flach_algorithm(y_true: np.ndarray, y_pred: np.ndarray) -> List[float]:
+def lachiche_flach_algorithm(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
     """
     Compute the Lachiche Flach Algorithm given input multiclass true outcomes, y_true, and predicted outcomes, y_pred.
 
@@ -68,47 +73,55 @@ def lachiche_flach_algorithm(y_true: np.ndarray, y_pred: np.ndarray) -> List[flo
         y_pred (np.ndarray): (N, O) array of outcome probability predictions.
 
     Returns:
-        weights (List of floats): (O, ) array of weights to maximize F1 score.
+        weights np.ndarray: (O, ) array of weights to maximize F1 score. Each weight matches the corresponding class.
     """
+    # Unpack variables
+    _, num_classes = y_true.shape
 
-    # Convert predictions to scores
-    if np.all(y_pred <= 1):
-        y_pred_score = _convert_prob_to_score(y_pred)
-    else:
-        y_pred_score = y_pred
+    # Convert predictions to scores if necessary (i.e. y_pred < 1 across the whole array)
+    y_pred_score = utils._convert_prob_to_score(y_pred) if np.all(y_pred <= 1) else y_pred
 
-    # Get some useful variables
-    num_samples, num_classes = y_true.shape
-    samples_per_class = np.sum(y_true, axis=0)
-    _class_order_by_size = np.argsort(samples_per_class)[::-1]         # Order classes by number of samples, largest to smallest
+    # Order classes by number of samples, largest to smallest
+    class_sizes = np.sum(y_true, axis=0)
+    ordered_classes = np.argsort(class_sizes)[::-1]
 
-    # Initialize weights
-    weights = np.zeros(num_classes)
+    # Initialize weights and set largest to 1 without loss of generality
+    weights_ordered = np.zeros(num_classes)
+    weights_ordered[0] = 1
 
-    # Loop through each class by decreasing number of samples, and determine best weight through 2-way comparison
-    weights[0] = 1
-    for class_idx in _class_order_by_size[1:]:
+    # Iteratively compute weights for each class based on classes previously seen
+    for cur_class_idx, cur_class in enumerate(ordered_classes[1:], start=1):
 
-        # Initialize instance tracker and classes that have been seen previously
-        I = []
-        seen_classes = _class_order_by_size[:class_idx]
-        weights_seen_classes = weights[seen_classes]
+        # Get the list of classes for which weights have been computed, and access their weights
+        classes_with_computed_weights = ordered_classes[:cur_class_idx]
+        weights_seen_classes = weights_ordered[:cur_class_idx]
 
-        # Estimate the estimates for each instance subsetted to previously seen classes
-        _weighted_score_estimates_seen_classes = weights_seen_classes.reshape(1, -1) * y_pred_score[:, seen_classes] 
+        # Across population, compute estimates for each seen class based on their estimated weight, and compute maximum estimate across seen classes
+        _max_estimate_seen_classes = np.max(
+            weights_seen_classes.reshape(1, -1) * y_pred_score[:, classes_with_computed_weights],
+            axis=1
+        )
 
-        # Compute most likely class and maximum weighted score for each instance based on seen classes only
-        _maximum_weighted_score = np.max(_weighted_score_estimates_seen_classes, axis=1)
-        _maximum_score_class = np.argmax(_weighted_score_estimates_seen_classes, axis=1)
-
-        # Compute ratio between score for current class and maximum weighted score
-        _score_ratio = y_pred_score[:, class_idx] / _maximum_weighted_score
+        # Compute ratio between score for current class and maximum estimate on seen classes
+        class_score_ratio = y_pred_score[:, cur_class] / _max_estimate_seen_classes
 
         # Compute weight based on two class analysis
-        weight_cur_class = _lachiche_flach_find_best_weight(y_true, _score_ratio, class_idx=class_idx)
+        weight_cur_class = _get_weight_F1_maximizer(y_true=y_true[:, cur_class], class_ratios=class_score_ratio)
 
-        # Loop through each instance to estimate the best likely estimate based on previously seen classes
-        for instance_idx in range(num_samples):
+        # Update weights
+        weights_ordered[cur_class_idx] = weight_cur_class
+
+    # Convert weights to original ordering of classes - note that argsorting the ordered classes gives the original ordering
+    weights = weights_ordered[np.argsort(ordered_classes)]
+
+    # Double check weights computed correctly
+    print("Weights computed: ", weights)
+    print("Class sizes: ", class_sizes)
+    print("Ordered classes: ", ordered_classes)
+    print("Weights ordered: ", weights_ordered)
+
+    # Return weights
+    return weights
             
             
 
@@ -128,7 +141,7 @@ def accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """
 
     # Convert to labels
-    labels_pred, labels_true = _convert_to_labels_if_score(y_pred, y_true)
+    labels_pred, labels_true = map(utils._convert_to_labels_if_score, (y_pred, y_true))
 
     # Compare pairwise and sum across tensor
     correct_pred = np.sum(labels_pred == labels_true)
@@ -143,10 +156,7 @@ def accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 def get_true_false_pos_neg(label_true: np.ndarray, label_pred: np.ndarray) -> Tuple[int, int, int, int]:
     """
     Compute TP, FP, FN, TN between predicted true label label_true, and predicted label label_pred.
-    
-    Args:
-        label_true (_type_): (N, ) array of true labels in [0, 1]
-        label_pred (_type_): (N, ) array of predicted labels in [0,1]
+    cost/accuracy
 
     Returns:
         TP, FP, FN, TN (_type_): scalar recall score.
@@ -159,6 +169,31 @@ def get_true_false_pos_neg(label_true: np.ndarray, label_pred: np.ndarray) -> Tu
     TN = int(np.sum((label_pred == label_true) & (label_true == 0)))
 
     return TP, FP, FN, TN
+
+
+def f1_binary(label_true: np.ndarray, label_pred: np.ndarray) -> float:
+    """
+    Compute F1 score between predicted true label label_true, and predicted label label_pred.
+
+    Args:
+        label_true (_type_): (N, ) array of true labels in [0, 1]
+        label_pred (_type_): (N, ) array of predicted labels in [0,1]
+
+    Returns:
+        f1 (_type_): scalar F1 score.
+    """
+    
+    # Compute TP, FP, FN
+    TP, FP, FN, _ = get_true_false_pos_neg(label_true, label_pred)
+
+    # Compute precision and recall
+    precision = TP / (TP + FP) if TP + FP > 0 else 0
+    recall = TP / (TP + FN) if TP + FN > 0 else 0
+
+    # Compute F1
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall > 0 else 0
+
+    return f1
 
 
 def recall_binary(label_true: np.ndarray, label_pred: np.ndarray) -> float:
@@ -198,7 +233,7 @@ def recall_multiclass(y_true: np.ndarray, y_pred: np.ndarray) -> List[float]:
     """
 
     # Convert to labels
-    labels_pred, labels_true = _convert_to_labels_if_score(y_pred, y_true)
+    labels_pred, labels_true = map(utils._convert_to_labels_if_score, (y_pred, y_true))
 
     # Initialize tracker of recall scores
     recall_scores = []
@@ -287,7 +322,7 @@ def macro_f1_multiclass(y_true: np.ndarray, y_pred: np.ndarray) -> List[float]:
     """
 
     # Convert to labels
-    labels_pred, labels_true = _convert_to_labels_if_score(y_pred, y_true)
+    labels_pred, labels_true = map(utils._convert_to_labels_if_score, (y_pred, y_true))
 
     # Initialize tracker of f1 score
     f1_scores = []
@@ -328,7 +363,7 @@ def micro_f1_multiclass(y_true: np.ndarray, y_pred: np.ndarray) -> Union[np.floa
     """
 
     # Convert to labels
-    labels_pred, labels_true = _convert_to_labels_if_score(y_pred, y_true)
+    labels_pred, labels_true = map(utils._convert_to_labels_if_score, (y_pred, y_true))
 
     # Initialize trackers
     total_tp, total_fp, total_fn = 0, 0, 0
@@ -457,9 +492,17 @@ def get_multiclass_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: U
         raise ValueError("y_true and y_pred must both be either np.ndarray or torch.Tensor")
 
 
+    # If implementing Lachiche Flach Algorithm (identify class weights)
     if run_weight_algo:
-        y_true_npy, y_pred_npy, weights = lachiche_flach_algorithm(y_true_npy, y_pred_npy, return_weights=True)
-        y_true_torch, y_pred_torch = utils.convert_to_torch(y_true_npy, y_pred_npy)
+
+        # Estimate class weights using Lachiche Flach Algorithm and convert probs to scores
+        class_weights = lachiche_flach_algorithm(y_true_npy, y_pred_npy)
+        y_pred_weighted_scores = utils._convert_prob_to_score(y_pred_npy) * class_weights.reshape(1, -1)
+
+        # Pass new scores through softmax to get new probabilities
+        y_pred_npy = utils._convert_scores_to_prob(y_pred_weighted_scores)
+        assert isinstance(y_pred_npy, np.ndarray)
+    
 
     # Compute scores for confusion matrix
     acc = accuracy(y_true_npy, y_pred_npy)
