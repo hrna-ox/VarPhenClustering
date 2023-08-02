@@ -651,6 +651,7 @@ class DirVRNN(nn.Module):
         self.eval()
 
         # Apply forward prediction
+        output_dir = {}
         with torch.inference_mode():
             for X, y in test_loader:
 
@@ -697,6 +698,25 @@ class DirVRNN(nn.Module):
                 log.log_supervised_performance(iter="test", scores_dic=future_sup_scores, subdir="test/future/supervised_scores")
                 log.log_supervised_performance(iter="test", scores_dic=future_sup_scores_lachiche_algo, subdir="test/future/supervised_scores_lachiche_algo")
                 log.log_clustering_performance(iter="test", scores_dic=future_clus_scores, subdir="test/future/unsupervised_scores")
+
+                output_dir = {
+                    "losses": {
+                        "loss": test_loss,
+                        "loss_loglik": test_loglik,
+                        "loss_kl": test_kl,
+                        "loss_out": test_outl
+                    },
+                    "history": {
+                        "y_pred": past_y_pred,
+                        "pis": past_clus_pred,
+                        "zs": past_z_est
+                    },
+                    "future": {
+                        "y_pred": future_y_pred,
+                        "pis": future_clus_pred,
+                        "zs": future_z_est
+                    }
+                }
         
         # Log model params, model and other objects
         save_objects = {
@@ -711,5 +731,5 @@ class DirVRNN(nn.Module):
 
         log.log_objects(objects=save_objects, save_name="test_output")
 
-        return 
+        return {**output_dir, **save_objects}
 # endregion
