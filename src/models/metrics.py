@@ -14,7 +14,7 @@ from torchmetrics import AveragePrecision
 import numpy as np
 import sklearn.metrics as metrics
 
-import utils_general as utils
+import src.utils_general as utils
 
 eps = 1e-8
 
@@ -113,12 +113,6 @@ def lachiche_flach_algorithm(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarr
 
     # Convert weights to original ordering of classes - note that argsorting the ordered classes gives the original ordering
     weights = weights_ordered[np.argsort(ordered_classes)]
-
-    # Double check weights computed correctly
-    print("Weights computed: ", weights)
-    print("Class sizes: ", class_sizes)
-    print("Ordered classes: ", ordered_classes)
-    print("Weights ordered: ", weights_ordered)
 
     # Return weights
     return weights
@@ -405,7 +399,7 @@ def auroc(y_true: np.ndarray, y_pred: np.ndarray) -> Union[List, np.floating, fl
     # Convert to labels
     labels_true = np.argmax(y_true, axis=-1).astype(int)
 
-    # Compute Roc per class
+    # Compute Area under the Curve for the ROC Curve for each class
     ovr_roc_scores = metrics.roc_auc_score(labels_true, y_score=y_pred, average="macro",
                             multi_class="ovr")
     
@@ -501,7 +495,9 @@ def get_multiclass_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: U
 
         # Pass new scores through softmax to get new probabilities
         y_pred_npy = utils._convert_scores_to_prob(y_pred_weighted_scores)
-        assert isinstance(y_pred_npy, np.ndarray)
+        
+        # Normalize new probabilities to sum to 1
+        y_pred_npy = y_pred_npy / np.sum(y_pred_npy, axis=-1, keepdims=True)
     
 
     # Compute scores for confusion matrix

@@ -1,0 +1,187 @@
+2023-08-02 15:49:46,233 INFO    StreamThr :7400 [internal.py:wandb_internal():86] W&B internal server running at pid: 7400, started at: 2023-08-02 15:49:46.232321
+2023-08-02 15:49:46,236 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: status
+2023-08-02 15:49:46,240 INFO    WriterThread:7400 [datastore.py:open_for_write():85] open: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/run-6f8iee1p.wandb
+2023-08-02 15:49:46,241 DEBUG   SenderThread:7400 [sender.py:send():379] send: header
+2023-08-02 15:49:46,247 DEBUG   SenderThread:7400 [sender.py:send():379] send: run
+2023-08-02 15:49:46,647 INFO    SenderThread:7400 [dir_watcher.py:__init__():211] watching files in: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files
+2023-08-02 15:49:46,647 INFO    SenderThread:7400 [sender.py:_start_run_threads():1122] run started: 6f8iee1p with start time 1690987786.232842
+2023-08-02 15:49:46,647 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: summary_record
+2023-08-02 15:49:46,649 INFO    SenderThread:7400 [sender.py:_save_file():1376] saving file wandb-summary.json with policy end
+2023-08-02 15:49:46,661 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: check_version
+2023-08-02 15:49:46,662 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: check_version
+2023-08-02 15:49:46,736 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: run_start
+2023-08-02 15:49:46,748 DEBUG   HandlerThread:7400 [system_info.py:__init__():31] System info init
+2023-08-02 15:49:46,748 DEBUG   HandlerThread:7400 [system_info.py:__init__():46] System info init done
+2023-08-02 15:49:46,748 INFO    HandlerThread:7400 [system_monitor.py:start():181] Starting system monitor
+2023-08-02 15:49:46,749 INFO    SystemMonitor:7400 [system_monitor.py:_start():145] Starting system asset monitoring threads
+2023-08-02 15:49:46,750 INFO    HandlerThread:7400 [system_monitor.py:probe():201] Collecting system info
+2023-08-02 15:49:46,751 INFO    SystemMonitor:7400 [interfaces.py:start():190] Started cpu monitoring
+2023-08-02 15:49:46,751 INFO    SystemMonitor:7400 [interfaces.py:start():190] Started disk monitoring
+2023-08-02 15:49:46,753 INFO    SystemMonitor:7400 [interfaces.py:start():190] Started gpu monitoring
+2023-08-02 15:49:46,754 INFO    SystemMonitor:7400 [interfaces.py:start():190] Started memory monitoring
+2023-08-02 15:49:46,754 INFO    SystemMonitor:7400 [interfaces.py:start():190] Started network monitoring
+2023-08-02 15:49:46,766 ERROR   gpu       :7400 [interfaces.py:monitor():144] Failed to sample metric: Not Supported
+2023-08-02 15:49:46,767 ERROR   gpu       :7400 [interfaces.py:monitor():144] Failed to sample metric: Not Supported
+2023-08-02 15:49:46,782 DEBUG   HandlerThread:7400 [system_info.py:probe():195] Probing system
+2023-08-02 15:49:46,784 DEBUG   HandlerThread:7400 [system_info.py:_probe_git():180] Probing git
+2023-08-02 15:49:46,796 DEBUG   HandlerThread:7400 [system_info.py:_probe_git():188] Probing git done
+2023-08-02 15:49:46,796 DEBUG   HandlerThread:7400 [system_info.py:probe():240] Probing system done
+2023-08-02 15:49:46,796 DEBUG   HandlerThread:7400 [system_monitor.py:probe():210] {'os': 'Linux-5.4.0-150-generic-x86_64-with-glibc2.27', 'python': '3.10.0', 'heartbeatAt': '2023-08-02T14:49:46.782627', 'startedAt': '2023-08-02T14:49:46.220143', 'docker': None, 'cuda': None, 'args': (), 'state': 'running', 'program': '-m src.models.dirvrnn_run', 'git': {'remote': 'https://github.com/hrna-ox/VarPhenClustering.git', 'commit': '272a5a857198dfe32fbd6a1308489e9fc0832f3d'}, 'email': 'henrique.aguiar@eng.ox.ac.uk', 'root': '/home/ball4537/PycharmProjects/VarPhenClustering', 'host': 'engs-28454', 'username': 'ball4537', 'executable': '/home/ball4537/anaconda3/envs/dirvrnn-env/bin/python', 'cpu_count': 4, 'cpu_count_logical': 8, 'cpu_freq': {'current': 2198.132875, 'min': 1200.0, 'max': 3900.0}, 'cpu_freq_per_core': [{'current': 2571.104, 'min': 1200.0, 'max': 3900.0}, {'current': 1200.006, 'min': 1200.0, 'max': 3900.0}, {'current': 1427.649, 'min': 1200.0, 'max': 3900.0}, {'current': 3738.476, 'min': 1200.0, 'max': 3900.0}, {'current': 2442.44, 'min': 1200.0, 'max': 3900.0}, {'current': 1200.023, 'min': 1200.0, 'max': 3900.0}, {'current': 1305.121, 'min': 1200.0, 'max': 3900.0}, {'current': 3700.244, 'min': 1200.0, 'max': 3900.0}], 'disk': {'total': 466.2383117675781, 'used': 429.04502868652344}, 'gpu': 'NVIDIA GeForce RTX 3060', 'gpu_count': 2, 'gpu_devices': [{'name': 'NVIDIA GeForce RTX 3060', 'memory_total': 12884901888}, {'name': 'Quadro P400', 'memory_total': 2147483648}], 'memory': {'total': 31.05492401123047}}
+2023-08-02 15:49:46,796 INFO    HandlerThread:7400 [system_monitor.py:probe():211] Finished collecting system info
+2023-08-02 15:49:46,796 INFO    HandlerThread:7400 [system_monitor.py:probe():214] Publishing system info
+2023-08-02 15:49:46,796 DEBUG   HandlerThread:7400 [system_info.py:_save_pip():51] Saving list of pip packages installed into the current environment
+2023-08-02 15:49:46,799 DEBUG   HandlerThread:7400 [system_info.py:_save_pip():67] Saving pip packages done
+2023-08-02 15:49:46,799 DEBUG   HandlerThread:7400 [system_info.py:_save_conda():74] Saving list of conda packages installed into the current environment
+2023-08-02 15:49:47,650 INFO    Thread-12 :7400 [dir_watcher.py:_on_file_created():272] file/dir created: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/wandb-summary.json
+2023-08-02 15:49:47,651 INFO    Thread-12 :7400 [dir_watcher.py:_on_file_created():272] file/dir created: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/conda-environment.yaml
+2023-08-02 15:49:47,651 INFO    Thread-12 :7400 [dir_watcher.py:_on_file_created():272] file/dir created: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/requirements.txt
+2023-08-02 15:49:48,769 ERROR   gpu       :7400 [interfaces.py:monitor():144] Failed to sample metric: Not Supported
+2023-08-02 15:49:48,770 ERROR   gpu       :7400 [interfaces.py:monitor():144] Failed to sample metric: Not Supported
+2023-08-02 15:49:50,600 DEBUG   HandlerThread:7400 [system_info.py:_save_conda():86] Saving conda packages done
+2023-08-02 15:49:50,605 INFO    HandlerThread:7400 [system_monitor.py:probe():216] Finished publishing system info
+2023-08-02 15:49:50,609 DEBUG   SenderThread:7400 [sender.py:send():379] send: files
+2023-08-02 15:49:50,609 INFO    SenderThread:7400 [sender.py:_save_file():1376] saving file wandb-metadata.json with policy now
+2023-08-02 15:49:50,613 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: stop_status
+2023-08-02 15:49:50,614 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: stop_status
+2023-08-02 15:49:50,648 INFO    Thread-12 :7400 [dir_watcher.py:_on_file_modified():289] file/dir modified: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/conda-environment.yaml
+2023-08-02 15:49:50,649 INFO    Thread-12 :7400 [dir_watcher.py:_on_file_created():272] file/dir created: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/wandb-metadata.json
+2023-08-02 15:49:50,772 ERROR   gpu       :7400 [interfaces.py:monitor():144] Failed to sample metric: Not Supported
+2023-08-02 15:49:50,773 ERROR   gpu       :7400 [interfaces.py:monitor():144] Failed to sample metric: Not Supported
+2023-08-02 15:49:50,825 DEBUG   SenderThread:7400 [sender.py:send():379] send: telemetry
+2023-08-02 15:49:51,021 DEBUG   SenderThread:7400 [sender.py:send():379] send: telemetry
+2023-08-02 15:49:51,031 DEBUG   SenderThread:7400 [sender.py:send():379] send: exit
+2023-08-02 15:49:51,031 INFO    SenderThread:7400 [sender.py:send_exit():584] handling exit code: 1
+2023-08-02 15:49:51,031 INFO    SenderThread:7400 [sender.py:send_exit():586] handling runtime: 4
+2023-08-02 15:49:51,035 INFO    SenderThread:7400 [sender.py:_save_file():1376] saving file wandb-summary.json with policy end
+2023-08-02 15:49:51,036 INFO    SenderThread:7400 [sender.py:send_exit():592] send defer
+2023-08-02 15:49:51,036 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:51,036 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 0
+2023-08-02 15:49:51,037 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:51,037 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 0
+2023-08-02 15:49:51,037 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 1
+2023-08-02 15:49:51,037 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:51,037 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 1
+2023-08-02 15:49:51,037 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:51,038 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 1
+2023-08-02 15:49:51,038 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 2
+2023-08-02 15:49:51,038 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:51,038 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 2
+2023-08-02 15:49:51,038 INFO    HandlerThread:7400 [system_monitor.py:finish():190] Stopping system monitor
+2023-08-02 15:49:51,038 DEBUG   SystemMonitor:7400 [system_monitor.py:_start():159] Starting system metrics aggregation loop
+2023-08-02 15:49:51,039 DEBUG   SystemMonitor:7400 [system_monitor.py:_start():166] Finished system metrics aggregation loop
+2023-08-02 15:49:51,039 INFO    HandlerThread:7400 [interfaces.py:finish():202] Joined cpu monitor
+2023-08-02 15:49:51,039 DEBUG   SystemMonitor:7400 [system_monitor.py:_start():170] Publishing last batch of metrics
+2023-08-02 15:49:51,039 INFO    HandlerThread:7400 [interfaces.py:finish():202] Joined disk monitor
+2023-08-02 15:49:51,053 INFO    wandb-upload_0:7400 [upload_job.py:push():131] Uploaded file /tmp/tmp8rrvsltfwandb/ypfy4o2s-wandb-metadata.json
+2023-08-02 15:49:51,127 ERROR   gpu       :7400 [interfaces.py:aggregate():161] Failed to serialize metric: division by zero
+2023-08-02 15:49:51,127 INFO    HandlerThread:7400 [interfaces.py:finish():202] Joined gpu monitor
+2023-08-02 15:49:51,128 INFO    HandlerThread:7400 [interfaces.py:finish():202] Joined memory monitor
+2023-08-02 15:49:51,128 INFO    HandlerThread:7400 [interfaces.py:finish():202] Joined network monitor
+2023-08-02 15:49:51,128 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:51,129 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 2
+2023-08-02 15:49:51,129 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 3
+2023-08-02 15:49:51,129 DEBUG   SenderThread:7400 [sender.py:send():379] send: stats
+2023-08-02 15:49:51,129 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:51,129 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 3
+2023-08-02 15:49:51,129 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:51,129 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 3
+2023-08-02 15:49:51,129 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 4
+2023-08-02 15:49:51,129 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:51,129 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 4
+2023-08-02 15:49:51,130 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:51,130 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 4
+2023-08-02 15:49:51,130 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 5
+2023-08-02 15:49:51,130 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:51,130 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 5
+2023-08-02 15:49:51,130 DEBUG   SenderThread:7400 [sender.py:send():379] send: summary
+2023-08-02 15:49:51,131 INFO    SenderThread:7400 [sender.py:_save_file():1376] saving file wandb-summary.json with policy end
+2023-08-02 15:49:51,131 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:51,131 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 5
+2023-08-02 15:49:51,132 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 6
+2023-08-02 15:49:51,132 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:51,132 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 6
+2023-08-02 15:49:51,132 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:51,132 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 6
+2023-08-02 15:49:51,135 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: status_report
+2023-08-02 15:49:51,336 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 7
+2023-08-02 15:49:51,336 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:51,337 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 7
+2023-08-02 15:49:51,337 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:51,337 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 7
+2023-08-02 15:49:51,649 INFO    Thread-12 :7400 [dir_watcher.py:_on_file_modified():289] file/dir modified: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/wandb-summary.json
+2023-08-02 15:49:51,650 INFO    Thread-12 :7400 [dir_watcher.py:_on_file_modified():289] file/dir modified: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/config.yaml
+2023-08-02 15:49:51,650 INFO    Thread-12 :7400 [dir_watcher.py:_on_file_created():272] file/dir created: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/output.log
+2023-08-02 15:49:52,032 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: poll_exit
+2023-08-02 15:49:53,062 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 8
+2023-08-02 15:49:53,063 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: poll_exit
+2023-08-02 15:49:53,063 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:53,064 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 8
+2023-08-02 15:49:53,064 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:53,064 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 8
+2023-08-02 15:49:53,065 INFO    SenderThread:7400 [job_builder.py:build():280] Attempting to build job artifact
+2023-08-02 15:49:53,065 INFO    SenderThread:7400 [job_builder.py:_get_source_type():400] no source found
+2023-08-02 15:49:53,065 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 9
+2023-08-02 15:49:53,066 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:53,066 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 9
+2023-08-02 15:49:53,066 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:53,067 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 9
+2023-08-02 15:49:53,067 INFO    SenderThread:7400 [dir_watcher.py:finish():359] shutting down directory watcher
+2023-08-02 15:49:53,650 INFO    Thread-12 :7400 [dir_watcher.py:_on_file_modified():289] file/dir modified: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/output.log
+2023-08-02 15:49:53,651 INFO    SenderThread:7400 [dir_watcher.py:finish():389] scan: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files
+2023-08-02 15:49:53,652 INFO    SenderThread:7400 [dir_watcher.py:finish():403] scan save: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/conda-environment.yaml conda-environment.yaml
+2023-08-02 15:49:53,652 INFO    SenderThread:7400 [dir_watcher.py:finish():403] scan save: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/wandb-metadata.json wandb-metadata.json
+2023-08-02 15:49:53,653 INFO    SenderThread:7400 [dir_watcher.py:finish():403] scan save: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/config.yaml config.yaml
+2023-08-02 15:49:53,653 INFO    SenderThread:7400 [dir_watcher.py:finish():403] scan save: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/requirements.txt requirements.txt
+2023-08-02 15:49:53,659 INFO    SenderThread:7400 [dir_watcher.py:finish():403] scan save: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/output.log output.log
+2023-08-02 15:49:53,665 INFO    SenderThread:7400 [dir_watcher.py:finish():403] scan save: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/wandb-summary.json wandb-summary.json
+2023-08-02 15:49:53,667 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 10
+2023-08-02 15:49:53,673 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:53,673 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 10
+2023-08-02 15:49:53,679 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:53,679 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 10
+2023-08-02 15:49:53,679 INFO    SenderThread:7400 [file_pusher.py:finish():159] shutting down file pusher
+2023-08-02 15:49:54,101 INFO    wandb-upload_1:7400 [upload_job.py:push():131] Uploaded file /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/config.yaml
+2023-08-02 15:49:54,148 INFO    wandb-upload_2:7400 [upload_job.py:push():131] Uploaded file /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/requirements.txt
+2023-08-02 15:49:54,158 INFO    wandb-upload_4:7400 [upload_job.py:push():131] Uploaded file /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/wandb-summary.json
+2023-08-02 15:49:54,175 INFO    wandb-upload_0:7400 [upload_job.py:push():131] Uploaded file /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/conda-environment.yaml
+2023-08-02 15:49:54,198 INFO    wandb-upload_3:7400 [upload_job.py:push():131] Uploaded file /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/files/output.log
+2023-08-02 15:49:54,399 INFO    Thread-11 (_thread_body):7400 [sender.py:transition_state():612] send defer: 11
+2023-08-02 15:49:54,400 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:54,400 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 11
+2023-08-02 15:49:54,401 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:54,401 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 11
+2023-08-02 15:49:54,401 INFO    SenderThread:7400 [file_pusher.py:join():164] waiting for file pusher
+2023-08-02 15:49:54,401 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 12
+2023-08-02 15:49:54,401 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:54,402 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 12
+2023-08-02 15:49:54,402 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:54,402 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 12
+2023-08-02 15:49:54,570 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 13
+2023-08-02 15:49:54,570 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:54,570 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 13
+2023-08-02 15:49:54,571 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:54,571 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 13
+2023-08-02 15:49:54,571 INFO    SenderThread:7400 [sender.py:transition_state():612] send defer: 14
+2023-08-02 15:49:54,572 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: defer
+2023-08-02 15:49:54,572 DEBUG   SenderThread:7400 [sender.py:send():379] send: final
+2023-08-02 15:49:54,573 INFO    HandlerThread:7400 [handler.py:handle_request_defer():170] handle defer: 14
+2023-08-02 15:49:54,573 DEBUG   SenderThread:7400 [sender.py:send():379] send: footer
+2023-08-02 15:49:54,573 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: defer
+2023-08-02 15:49:54,573 INFO    SenderThread:7400 [sender.py:send_request_defer():608] handle sender defer: 14
+2023-08-02 15:49:54,574 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: poll_exit
+2023-08-02 15:49:54,575 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: poll_exit
+2023-08-02 15:49:54,575 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: server_info
+2023-08-02 15:49:54,576 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: server_info
+2023-08-02 15:49:54,581 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: get_summary
+2023-08-02 15:49:54,582 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: sampled_history
+2023-08-02 15:49:54,582 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: job_info
+2023-08-02 15:49:54,818 DEBUG   SenderThread:7400 [sender.py:send_request():406] send_request: job_info
+2023-08-02 15:49:54,819 INFO    MainThread:7400 [wandb_run.py:_footer_history_summary_info():3475] rendering history
+2023-08-02 15:49:54,819 INFO    MainThread:7400 [wandb_run.py:_footer_history_summary_info():3507] rendering summary
+2023-08-02 15:49:54,819 INFO    MainThread:7400 [wandb_run.py:_footer_sync_info():3434] logging synced files
+2023-08-02 15:49:54,820 DEBUG   HandlerThread:7400 [handler.py:handle_request():144] handle_request: shutdown
+2023-08-02 15:49:54,820 INFO    HandlerThread:7400 [handler.py:finish():857] shutting down handler
+2023-08-02 15:49:55,583 INFO    WriterThread:7400 [datastore.py:close():294] close: /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_154946-6f8iee1p/run-6f8iee1p.wandb
+2023-08-02 15:49:55,819 INFO    SenderThread:7400 [sender.py:finish():1552] shutting down sender
+2023-08-02 15:49:55,819 INFO    SenderThread:7400 [file_pusher.py:finish():159] shutting down file pusher
+2023-08-02 15:49:55,819 INFO    SenderThread:7400 [file_pusher.py:join():164] waiting for file pusher

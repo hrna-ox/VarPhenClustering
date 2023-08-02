@@ -1,0 +1,33 @@
+Loading and Processing Data...
+Data MIMIC successfully loaded for features ['DBP', 'ESI', 'HR', 'RR', 'SBP', 'SPO2', 'TEMP', 'age', 'gender'] and outcomes ['Death', 'Discharge', 'ICU', 'Ward'].
+(X, y) shape: (8328, 10, 9), (8328, 4)
+Outcome Distribution: Death          26
+Discharge    2860
+ICU          1321
+Ward         4121
+dtype: int64
+Loading and Training Model for fold 1...
+ Logging experiments in exps/DirVRNN/Run_40_2023-08-02_18-21-44/fold_1
+Printing Losses loss, Log Lik, KL, Outl
+Epoch 1 :  100.00 - 97.15 - -98.90 - -0.16     Val 1 (100%): 96.44 - -98.28 - -0.17 - 1.67
+Traceback (most recent call last):
+  File "/home/ball4537/anaconda3/envs/dirvrnn-env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/ball4537/anaconda3/envs/dirvrnn-env/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/dirvrnn_run.py", line 125, in <module>
+    main()
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/dirvrnn_run.py", line 99, in main
+    model.fit(train_data=(X_train, y_train), val_data=(X_val, y_val),
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/DirVRNN.py", line 608, in fit
+    log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores, subdir="val/supervised_scores")
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/logging_utils.py", line 231, in log_supervised_performance
+    _write_to_csv_if_exists(f"{cur_save_fd}/confusion_matrix.csv", [iter] + scores_dic["confusion_matrix"].flatten().tolist())
+KeyError: 'confusion_matrix'
+WARNING: exps/DirVRNN/Run_40_2023-08-02_18-21-44/fold_1/val/losses/loss_tracker.csv does not exist. Data not saved.
+WARNING: exps/DirVRNN/Run_40_2023-08-02_18-21-44/fold_1/val/supervised_scores/recall.csv does not exist. Data not saved.
+WARNING: exps/DirVRNN/Run_40_2023-08-02_18-21-44/fold_1/val/supervised_scores/precision.csv does not exist. Data not saved.
+WARNING: exps/DirVRNN/Run_40_2023-08-02_18-21-44/fold_1/val/supervised_scores/micro_f1.csv does not exist. Data not saved.
+WARNING: exps/DirVRNN/Run_40_2023-08-02_18-21-44/fold_1/val/supervised_scores/macro_f1.csv does not exist. Data not saved.
+WARNING: exps/DirVRNN/Run_40_2023-08-02_18-21-44/fold_1/val/supervised_scores/roc_auc.csv does not exist. Data not saved.
+WARNING: exps/DirVRNN/Run_40_2023-08-02_18-21-44/fold_1/val/supervised_scores/pr_auc.csv does not exist. Data not saved.

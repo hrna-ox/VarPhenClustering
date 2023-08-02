@@ -1,0 +1,62 @@
+wandb_version: 1
+
+seed:
+  desc: null
+  value: 1313
+data_config:
+  desc: null
+  value:
+    data_name: MIMIC
+    time_range:
+    - 0
+    - 10
+    feat_set: vit-sta
+    train_val_ratio: 0.6
+    train_ratio: 0.4
+    K_folds: 5
+model_config:
+  desc: null
+  value:
+    outcome_size: 4
+    window_num_obvs: 1
+    num_clus: 6
+    latent_dim: 64
+    n_fwd_blocks: 2
+    gate_layers: 2
+    gate_nodes: 50
+    bias: true
+    dropout: 0.6
+training_config:
+  desc: null
+  value:
+    batch_size: 32
+    num_epochs: 30
+    lr: 0.001
+_wandb:
+  desc: null
+  value:
+    python_version: 3.10.0
+    cli_version: 0.15.6
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    start_time: 1690989625.004978
+    t:
+      1:
+      - 1
+      - 5
+      - 53
+      - 55
+      2:
+      - 1
+      - 5
+      - 53
+      - 55
+      3:
+      - 1
+      - 16
+      - 23
+      4: 3.10.0
+      5: 0.15.6
+      8:
+      - 5

@@ -1,0 +1,30 @@
+2023-08-02 17:52:08,802 INFO    MainThread:25448 [wandb_setup.py:_flush():76] Current SDK version is 0.15.6
+2023-08-02 17:52:08,803 INFO    MainThread:25448 [wandb_setup.py:_flush():76] Configure stats pid to 25448
+2023-08-02 17:52:08,803 INFO    MainThread:25448 [wandb_setup.py:_flush():76] Loading settings from /home/ball4537/.config/wandb/settings
+2023-08-02 17:52:08,803 INFO    MainThread:25448 [wandb_setup.py:_flush():76] Loading settings from /home/ball4537/PycharmProjects/VarPhenClustering/wandb/settings
+2023-08-02 17:52:08,803 INFO    MainThread:25448 [wandb_setup.py:_flush():76] Loading settings from environment variables: {}
+2023-08-02 17:52:08,803 INFO    MainThread:25448 [wandb_setup.py:_flush():76] Applying setup settings: {'_disable_service': False}
+2023-08-02 17:52:08,803 WARNING MainThread:25448 [wandb_setup.py:_flush():76] Could not find program at -m src.models.dirvrnn_run
+2023-08-02 17:52:08,803 INFO    MainThread:25448 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': None, 'program': '-m src.models.dirvrnn_run'}
+2023-08-02 17:52:08,803 INFO    MainThread:25448 [wandb_init.py:_log_setup():507] Logging user logs to /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_175208-svzh63qd/logs/debug.log
+2023-08-02 17:52:08,804 INFO    MainThread:25448 [wandb_init.py:_log_setup():508] Logging internal logs to /home/ball4537/PycharmProjects/VarPhenClustering/wandb/run-20230802_175208-svzh63qd/logs/debug-internal.log
+2023-08-02 17:52:08,804 INFO    MainThread:25448 [wandb_init.py:init():547] calling init triggers
+2023-08-02 17:52:08,804 INFO    MainThread:25448 [wandb_init.py:init():554] wandb.init called with sweep_config: {}
+config: {'seed': 1313, 'data_config': {'data_name': 'MIMIC', 'time_range': [0, 10], 'feat_set': 'vit-sta', 'train_val_ratio': 0.6, 'train_ratio': 0.4, 'K_folds': 5}, 'model_config': {'outcome_size': 4, 'window_num_obvs': 1, 'num_clus': 6, 'latent_dim': 64, 'n_fwd_blocks': 1, 'gate_layers': 1, 'gate_nodes': 10, 'bias': True, 'dropout': 0.0}, 'training_config': {'batch_size': 256, 'num_epochs': 5, 'lr': 1e-06}}
+2023-08-02 17:52:08,805 INFO    MainThread:25448 [wandb_init.py:init():596] starting backend
+2023-08-02 17:52:08,805 INFO    MainThread:25448 [wandb_init.py:init():600] setting up manager
+2023-08-02 17:52:08,808 INFO    MainThread:25448 [backend.py:_multiprocessing_setup():106] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2023-08-02 17:52:08,812 INFO    MainThread:25448 [wandb_init.py:init():606] backend started and connected
+2023-08-02 17:52:08,815 INFO    MainThread:25448 [wandb_init.py:init():697] updated telemetry
+2023-08-02 17:52:08,820 INFO    MainThread:25448 [wandb_init.py:init():730] communicating run to backend with 60.0 second timeout
+2023-08-02 17:52:09,283 INFO    MainThread:25448 [wandb_run.py:_on_init():2174] communicating current version
+2023-08-02 17:52:09,344 INFO    MainThread:25448 [wandb_run.py:_on_init():2183] got version response upgrade_message: "wandb version 0.15.8 is available!  To upgrade, please run:\n $ pip install wandb --upgrade"
+
+2023-08-02 17:52:09,344 INFO    MainThread:25448 [wandb_init.py:init():781] starting run threads in backend
+2023-08-02 17:52:13,590 INFO    MainThread:25448 [wandb_run.py:_console_start():2153] atexit reg
+2023-08-02 17:52:13,591 INFO    MainThread:25448 [wandb_run.py:_redirect():2008] redirect: wrap_raw
+2023-08-02 17:52:13,592 INFO    MainThread:25448 [wandb_run.py:_redirect():2073] Wrapping output streams.
+2023-08-02 17:52:13,592 INFO    MainThread:25448 [wandb_run.py:_redirect():2098] Redirects installed.
+2023-08-02 17:52:13,593 INFO    MainThread:25448 [wandb_init.py:init():822] run started, returning control to user process
+2023-08-02 17:52:14,032 INFO    MainThread:25448 [wandb_watch.py:watch():51] Watching
+2023-08-02 17:52:23,376 WARNING MsgRouterThr:25448 [router.py:message_loop():77] message_loop has been closed

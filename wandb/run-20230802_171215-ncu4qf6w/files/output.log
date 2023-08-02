@@ -1,0 +1,11 @@
+Loading and Processing Data...
+Data MIMIC successfully loaded for features ['DBP', 'ESI', 'HR', 'RR', 'SBP', 'SPO2', 'TEMP', 'age', 'gender'] and outcomes ['Death', 'Discharge', 'ICU', 'Ward'].
+(X, y) shape: (8328, 10, 9), (8328, 4)
+Outcome Distribution: Death          26
+Discharge    2860
+ICU          1321
+Ward         4121
+dtype: int64
+Loading and Training Model for fold 1...
+ Logging experiments in exps/DirVRNN/Run_15_2023-08-02_17-12-20/fold_1
+

@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 
 from torch.nn import LSTMCell
+import torch.nn.init as init
 
 #endregion
 
@@ -60,6 +61,10 @@ class MLP(nn.Module):
             # Define hidden layers
             _inter_input_size = input_size if _id == 0 else hidden_nodes
             hidden_layer = nn.Linear(in_features=_inter_input_size, out_features=hidden_nodes, bias=bias)
+
+            # Initialise weights
+            init.xavier_normal_(hidden_layer.weight)
+            init.uniform_(hidden_layer.bias, 0, 0)
 
             # Append to list of nn layers.
             self.nn_layers.append(hidden_layer)

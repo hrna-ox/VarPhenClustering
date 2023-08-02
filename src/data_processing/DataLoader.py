@@ -247,9 +247,9 @@ class CSVLoader:
         elif self.data_name == "MIMIC":
             # Load Data
             X = pd.read_csv(
-                data_fd + "vitals_process.csv", infer_datetime_format=True, header=0
+                data_fd + "vitals_process.csv", header=0, index_col=0
             )
-            y = pd.read_csv(data_fd + f"outcomes_process.csv")
+            y = pd.read_csv(data_fd + f"outcomes_48_process.csv", index_col=0, header=0)
 
         else:
             raise ValueError(
@@ -265,6 +265,7 @@ class CSVLoader:
 
         # Sort values
         X.sort_values(by=[self.id_col, self.time_col], ascending=[True, False], inplace=True)
+        assert y.index.is_monotonic_increasing
 
         return X, y
 
@@ -321,7 +322,10 @@ class DataTransformer(CSVLoader):
             # Load data from pickle file
             with open(data_fd + "data_transformed.pkl", "rb") as f:
                 data_dic = pickle.load(f)
-        
+
+                # Edit Data Og to avoid index loading issues
+                data_dic["data_og"] = data
+
         # Else compute data
         else:
                 
@@ -536,7 +540,7 @@ class DataLoader(DataTransformer):
         }
 
         # Print some base information
-        print(f"Data {self.data_name} successfully loaded for features {self.features} and outcomes {self.outcomes}.",
+        print(f"\nData {self.data_name} successfully loaded for features {self.features} and outcomes {self.outcomes}.",
             f"(X, y) shape: {x_arr.shape}, {y_arr.shape}",
             f"Outcome Distribution: {y_og.sum(axis=0).astype(int)}",
             sep="\n"

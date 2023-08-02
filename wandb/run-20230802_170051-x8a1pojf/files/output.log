@@ -1,0 +1,92 @@
+Loading and Processing Data...
+Data MIMIC successfully loaded for features ['DBP', 'ESI', 'HR', 'RR', 'SBP', 'SPO2', 'TEMP', 'age', 'gender'] and outcomes ['Death', 'Discharge', 'ICU', 'Ward'].
+(X, y) shape: (8328, 10, 9), (8328, 4)
+Outcome Distribution: Death          26
+Discharge    2860
+ICU          1321
+Ward         4121
+dtype: int64
+Loading and Training Model...
+ Logging experiments in exps/DirVRNN/Run_9_2023-08-02_17-00-58/fold_1
+
+Train epoch: 1   [-119.94 - 27.2]
+Traceback (most recent call last):
+  File "/home/ball4537/anaconda3/envs/dirvrnn-env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/ball4537/anaconda3/envs/dirvrnn-env/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/dirvrnn_run.py", line 125, in <module>
+    main()
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/dirvrnn_run.py", line 99, in main
+    model.fit(train_data=(X_train, y_train), val_data=(X_val, y_val),
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/DirVRNN.py", line 516, in fit
+    batch_loss, batch_loglik, batch_kl, batch_outl, train_history, train_forward = self.forward(x, y, mode="train")
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/DirVRNN.py", line 423, in forward
+    pred_loss = LM_utils.torch_CatCE(y_true=y, y_pred=y_pred)
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/loss_functions.py", line 94, in torch_CatCE
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/loss_functions.py", line 90, in torch_CatCE
+    assert torch.all(torch.greater_equal(y_pred, 0)), "y_pred has to be non-negative."
+tensor([[nan, nan, nan, nan],1.2]
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan],
+        [nan, nan, nan, nan]], grad_fn=<SoftmaxBackward0>)
+tensor([[0., 1., 0., 0.],
+        [0., 0., 1., 0.],
+        [0., 0., 0., 1.],
+        [0., 0., 0., 1.],
+        [0., 0., 0., 1.],
+        [0., 0., 0., 1.],
+        [0., 0., 1., 0.],
+        [0., 0., 0., 1.],
+        [0., 0., 0., 1.],
+        [0., 1., 0., 0.],
+        [0., 0., 1., 0.],
+        [0., 0., 0., 1.],
+        [0., 0., 0., 1.],
+        [0., 0., 0., 1.],
+        [0., 0., 0., 1.],
+        [0., 0., 1., 0.],
+        [0., 0., 0., 1.],
+        [0., 0., 0., 1.],
+        [0., 1., 0., 0.],
+        [0., 0., 0., 1.],
+        [0., 0., 0., 1.],
+        [0., 0., 1., 0.],
+        [0., 1., 0., 0.],
+        [0., 1., 0., 0.],
+        [0., 0., 0., 1.],
+        [0., 0., 0., 1.],
+        [0., 1., 0., 0.],
+        [0., 1., 0., 0.],
+        [0., 1., 0., 0.],
+        [0., 0., 0., 1.],
+        [0., 0., 0., 1.],
+        [0., 0., 1., 0.]])

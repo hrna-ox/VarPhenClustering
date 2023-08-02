@@ -1,0 +1,51 @@
+ Loading and Processing Data...
+          Death  Discharge  ICU  Ward
+stay_id
+30001414      0          0    0     1
+30003172      0          0    1     0
+30003919      0          0    0     1
+30004297      0          0    0     1
+30005462      0          0    0     1
+...         ...        ...  ...   ...
+39998283      0          1    0     0
+39999102      0          1    0     0
+39999434      0          1    0     0
+39999678      0          0    0     1
+39999833      0          1    0     0
+[8328 rows x 4 columns]
+Data MIMIC successfully loaded for features ['DBP', 'ESI', 'HR', 'RR', 'SBP', 'SPO2', 'TEMP', 'age', 'gender'] and outcomes ['Death', 'Discharge', 'ICU', 'Ward'].
+(X, y) shape: (8328, 10, 9), (8328, 4)
+Outcome Distribution: [291433051618           26         2860         1321         4121]
+       stay_id  Death  Discharge  ICU  Ward
+0     30001414      0          0    0     1
+1     30003172      0          0    1     0
+2     30003919      0          0    0     1
+3     30004297      0          0    0     1
+4     30005462      0          0    0     1
+...        ...    ...        ...  ...   ...
+8323  39998283      0          1    0     0
+8324  39999102      0          1    0     0
+8325  39999434      0          1    0     0
+8326  39999678      0          0    0     1
+8327  39999833      0          1    0     0
+[8328 rows x 5 columns]
+/n Loading and Training Model...
+ Logging experiments in exps/DirVRNN/Run_5_2023-08-02_16-17-09/fold_1
+
+Train epoch: 1   [-inf - 28.8].0]
+Traceback (most recent call last):
+  File "/home/ball4537/anaconda3/envs/dirvrnn-env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/ball4537/anaconda3/envs/dirvrnn-env/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/dirvrnn_run.py", line 126, in <module>
+    main()
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/dirvrnn_run.py", line 100, in main
+    model.fit(train_data=(X_train, y_train), val_data=(X_val, y_val),
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/DirVRNN.py", line 516, in fit
+    batch_loss, batch_loglik, batch_kl, batch_outl, train_history, train_forward = self.forward(x, y, mode="train")
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/DirVRNN.py", line 423, in forward
+    pred_loss = LM_utils.torch_CatCE(y_true=y, y_pred=y_pred)
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/loss_functions.py", line 89, in torch_CatCE
+    assert torch.all(torch.greater_equal(y_pred, 0)), "y_pred has to be non-negative."
+AssertionError: y_pred has to be non-negative.

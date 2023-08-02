@@ -1,0 +1,34 @@
+ Loading and Processing Data...
+Data MIMIC successfully loaded for features ['DBP', 'ESI', 'HR', 'RR', 'SBP', 'SPO2', 'TEMP', 'age', 'gender'] and outcomes ['Death', 'Discharge', 'ICU', 'Ward'].
+(X, y) shape: (8328, 10, 9), (8328, 4)
+Outcome Distribution: [291433051618           26         2860         1321         4121]
+/n Loading and Training Model...
+Logging experiments in /1
+Traceback (most recent call last):
+  File "/home/ball4537/anaconda3/envs/dirvrnn-env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/ball4537/anaconda3/envs/dirvrnn-env/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/dirvrnn_run.py", line 126, in <module>
+    main()
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/dirvrnn_run.py", line 100, in main
+    model.fit(train_data=(X_train, y_train), val_data=(X_val, y_val),
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/DirVRNN.py", line 490, in fit
+    log = logger(
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/logging_utils.py", line 367, in __init__
+    super().__init__(save_dir=save_dir, class_names=class_names, K_fold_idx=K_fold_idx,
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/logging_utils.py", line 319, in __init__
+    super().__init__(*args, **kwargs)
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/logging_utils.py", line 233, in __init__
+    super().__init__(*args, **kwargs)
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/logging_utils.py", line 169, in __init__
+    super().__init__(*args, **kwargs)
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/logging_utils.py", line 96, in __init__
+    self.__make_save_subfolder(sub_fd="train")
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/logging_utils.py", line 116, in __make_save_subfolder
+    _mkdirs_if_not_exist(target_fd)
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/logging_utils.py", line 37, in _mkdirs_if_not_exist
+    os.makedirs(_dir)
+  File "/home/ball4537/anaconda3/envs/dirvrnn-env/lib/python3.10/os.py", line 225, in makedirs
+    mkdir(name, mode)
+PermissionError: [Errno 13] Permission denied: '/train'

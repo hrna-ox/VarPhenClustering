@@ -34,7 +34,11 @@ def _mkdirs_if_not_exist(*args):
     """
     for _dir in args:
         if not os.path.exists(_dir):
-            os.makedirs(_dir)
+            try: 
+                os.makedirs(_dir)
+            except PermissionError as e:
+                print(_dir)
+                raise e
 
 def _make_csv_if_not_exist(save_path: str, header: List = []):
     """
@@ -81,23 +85,28 @@ class BaseLogger:
     Python Class to log the training, validation and testing general models. Includes children that specify particular behaviours
     for particular models.
     """
-    def __init__(self, save_path: str, K_fold_idx: int = 1):
+    def __init__(self, save_dir: str, K_fold_idx: int = 1):
         "Object initialization."
 
         
         self.K_fold_idx = K_fold_idx
-        self.exp_save_dir = os.path.join(self._log_new_run_dir(save_path), f"/{self.K_fold_idx}")
+
+        # Get new run to avoid matches
+        new_run_dir = self._log_new_run_dir(save_dir)
+        self.exp_save_dir = f"{new_run_dir}/fold_{self.K_fold_idx}"
+        print("\n\n Logging experiments in {}".format(self.exp_save_dir))
+
 
         # Make target folder for experiment
-        self.__make_save_subfolder()
-        print(f"Logging experiments in {self.exp_save_dir}")
+        self._make_save_subfolder()
 
         # Initialize train/test folders
-        self.__make_save_subfolder(sub_fd="train")
-        self.__make_save_subfolder(sub_fd="test")
+        self._make_save_subfolder(sub_fd="train")
+        self._make_save_subfolder(sub_fd="test")
+        self._make_save_subfolder(sub_fd="val")
 
 
-    def __make_save_subfolder(self, sub_fd: str = ""):
+    def _make_save_subfolder(self, sub_fd: str = ""):
         """
         Make folder based on target sub-folder. The default behavior is None which defaults to creating self.save_dir if it does not
         exist.
@@ -111,9 +120,10 @@ class BaseLogger:
             target_fd = self.exp_save_dir
         
         else:
-            target_fd = os.path.join(self.exp_save_dir, f"/{sub_fd}")
+            target_fd = f"{self.exp_save_dir}/{sub_fd}"
 
         _mkdirs_if_not_exist(target_fd)
+        
 
 
     def _log_new_run_dir(self, save_dir: str = "exps/"):
@@ -132,7 +142,10 @@ class BaseLogger:
         dirs = os.listdir(save_dir)
 
         # Get all Run IDs
-        run_ids = [int(_dir.split("_")[-2]) for _dir in dirs if "Run_" in _dir]
+        if dirs == []:
+            run_ids = []
+        else:
+            run_ids = [int(_dir.split("_")[1]) for _dir in dirs if "Run_" in _dir]
 
         # Get next Run ID
         if len(run_ids) == 0:
@@ -141,7 +154,7 @@ class BaseLogger:
             next_run_id = max(run_ids) + 1
 
         # Create new directory
-        new_dir = os.path.join(save_dir, f"Run_{next_run_id}")
+        new_dir = f"{save_dir}/Run_{next_run_id}"
 
         # Append time stamp
         dir_with_time = new_dir + "_" + _get_save_timestamp()
@@ -188,7 +201,7 @@ class ClassifierLogger(BaseLogger):
             _make_csv_if_not_exist(csv_path, multiclass_header)
 
         # Create CSV for confusion matrix
-        _cm_header = ["iter"] + ["Tr_{i}_Pr_{j}".format(i, j) for j in self.class_names for i in self.class_names]
+        _cm_header = ["iter"] + [f"Tr_{i}_Pr_{j}" for j in self.class_names for i in self.class_names]
         _cm_path = f"{self.exp_save_dir}/{subdir}/confusion_matrix.csv"
         _make_csv_if_not_exist(_cm_path, _cm_header)
 
@@ -204,7 +217,7 @@ class ClassifierLogger(BaseLogger):
         """
 
         # Get Subfolder within experiment based on the mode
-        cur_save_fd = os.path.join(self.exp_save_dir, f"/{subdir}")
+        cur_save_fd = f"{self.exp_save_dir}/{subdir}"
 
         # Log accuracy
         if "accuracy" in scores_dic.keys():
@@ -276,7 +289,7 @@ class ClusteringLogger(BaseLogger):
         """
 
         # Get Subfolder within experiment based on the mode
-        cur_save_fd = os.path.join(self.exp_save_dir, f"/{subdir}")
+        cur_save_fd = f"{self.exp_save_dir}/{subdir}"
 
         # If clustering is not temporal then combine metrics into single CSV
         if not self._clus_is_temp:
@@ -318,8 +331,6 @@ class DLLogger(BaseLogger):
         # Initialize parent class
         super().__init__(*args, **kwargs)
 
-        # Create val subfolder
-        self.__make_save_subfolder("val")
 
         # Initialize loss trackers
         self._init_loss_trackers(subdir="train")

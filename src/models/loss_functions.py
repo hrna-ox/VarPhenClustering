@@ -6,14 +6,8 @@ Defines Loss Functions for the various models.
 """
 
 # ============= Import Libraries =============
-from typing import List
-from matplotlib import pyplot as plt
-from matplotlib.cm import get_cmap
-
 import torch
 
-import numpy as np
-import sklearn.metrics as metrics
 
 EPS = 1e-8
 
@@ -92,7 +86,11 @@ def torch_CatCE(y_true: torch.Tensor, y_pred: torch.Tensor) -> torch.Tensor:
     Outputs:
         - categorical distribution loss averaged over batch
     """
-    assert torch.all(torch.greater_equal(y_pred, 0)), "y_pred has to be non-negative."
+    try:
+        assert torch.all(torch.greater_equal(y_pred, 0)), "y_pred has to be non-negative."
+    except AssertionError as e:
+        print(y_pred)
+        raise e
 
     cat_ce = - torch.sum(y_true * torch.log(y_pred + EPS), dim=-1)         # Shape (batch_size)
 

@@ -273,9 +273,9 @@ class DirVRNN(nn.Module):
 
 
         # ========== Initialise relevant variables ==========
-        h = torch.zeros(batch_size, self.latent_dim, device=self.device)
-        est_pi = torch.ones(batch_size, self.K, device=self.device) / self.K
-        est_z = model_utils.compute_repr_from_clus_assign_prob(est_pi, self.c_means, self.log_c_vars)
+        past_h = torch.zeros(batch_size, self.latent_dim, device=self.device)
+        past_pi = torch.ones(batch_size, self.K, device=self.device) / self.K
+        past_z = model_utils.compute_repr_from_clus_assign_prob(past_pi, self.c_means, self.log_c_vars)
 
 
         # Initialize ELBO, history tracker and future tracker
@@ -319,10 +319,16 @@ class DirVRNN(nn.Module):
             _upper_t_idx = (window_id + 1) * self.window_num_obvs    # EXCLUSIVE
 
             # Generate data for current window block given the existing estimates - decompose into mean and log-variance
-            _, _, data_gen_params = self._decoder_pass(h=h, z=est_z)
+            _, _, data_gen_params = self._decoder_pass(h=past_h, z=past_z)
             gen_mean, gen_logvar = torch.chunk(data_gen_params, chunks=2, dim=-1)
         
-        
+            try:
+                assert torch.isnan(gen_mean).sum() == 0, "ERROR: NaNs in estimated representations"
+            except AssertionError as err:
+                print(err)
+                print("ERROR: NaNs in estimated representations")
+                import pdb; pdb.set_trace()
+
             # Iterate through each time step to estimate updated representations and compute loss terms
             for inner_t_idx, outer_t_idx in enumerate(range(_lower_t_idx, _upper_t_idx)):
 
@@ -331,15 +337,15 @@ class DirVRNN(nn.Module):
                 _est_mean, _est_logvar = gen_mean[:, inner_t_idx, :], gen_logvar[:, inner_t_idx, :]
 
                 # Compute alphas of prior and encoder networks given previous cell estimate and current input data
-                alpha_prior = self._prior_pass(h=h)
-                alpha_enc = self._encoder_pass(h=h, x=x_t)
+                alpha_prior = self._prior_pass(h=past_h)
+                alpha_enc = self._encoder_pass(h=past_h, x=x_t)
 
                 # Sample cluster probs given Dirichlet parameter, and estimate representations based on mixture of Gaussian model
-                est_pi = model_utils.sample_dir(alpha=alpha_enc)
-                est_z = model_utils.compute_repr_from_clus_assign_prob(pi_assign=est_pi, c_means=self.c_means, log_c_vars=self.log_c_vars)
+                past_pi = model_utils.sample_dir(alpha=alpha_enc)
+                past_z = model_utils.compute_repr_from_clus_assign_prob(pi_assign=past_pi, c_means=self.c_means, log_c_vars=self.log_c_vars)
 
                 # Update Cell State
-                h = self._cell_update_pass(h=h, x=x_t, z=est_z)
+                past_h = self._cell_update_pass(h=past_h, x=x_t, z=past_z)
 
                 # Compute Loss Terms
                 log_lik = LM_utils.torch_log_Gauss_likelihood(x=x_t, mu=_est_mean, logvar=_est_logvar, device=self.device)
@@ -350,8 +356,8 @@ class DirVRNN(nn.Module):
 
                 # Append objects to history tracker if we are in evaluation mode
                 if mode == "eval":
-                    history["pis"][:, outer_t_idx, :] = est_pi
-                    history["zs"][:, outer_t_idx, :] = est_z
+                    history["pis"][:, outer_t_idx, :] = past_pi
+                    history["zs"][:, outer_t_idx, :] = past_z
                     history["alpha_encs"][:, outer_t_idx, :] = alpha_enc
 
                     # Append generate mean, generate var
@@ -362,9 +368,9 @@ class DirVRNN(nn.Module):
                     history["loss_kl"][outer_t_idx] += kl_div
                     history["loss_loglik"][outer_t_idx] += log_lik
 
-
-
         # Iterate OVER FUTURE windows
+        fut_h, fut_pi, fut_z = past_h, past_pi, past_z
+
         windows_ftr = range(self.n_fwd_blocks)
         for window_id in windows_ftr:
 
@@ -373,7 +379,7 @@ class DirVRNN(nn.Module):
             _upper_t_idx = (window_id + 1) * self.window_num_obvs    # EXCLUSIVE
 
             # Generate data for current window block given the existing estimates - decompose into mean and log-variance
-            _, _, data_gen_params = self._decoder_pass(h=h, z=est_z)
+            _, _, data_gen_params = self._decoder_pass(h=fut_h, z=fut_z)
             gen_mean, gen_logvar = torch.chunk(data_gen_params, chunks=2, dim=-1)
 
 
@@ -388,15 +394,15 @@ class DirVRNN(nn.Module):
                 )
 
                 # Compute alphas of prior and encoder networks
-                alpha_prior = self._prior_pass(h=h)
-                alpha_enc = self._encoder_pass(h=h, x=gen_x_t)
+                alpha_prior = self._prior_pass(h=fut_h)
+                alpha_enc = self._encoder_pass(h=fut_h, x=gen_x_t)
 
                 # Sample cluster distribution from alpha_enc, and estimate samples from clusters based on mixture of Gaussian model
-                est_pi = model_utils.sample_dir(alpha=alpha_enc)
-                est_z = model_utils.compute_repr_from_clus_assign_prob(pi_assign=est_pi, c_means=self.c_means, log_c_vars=self.log_c_vars)
+                fut_pi = model_utils.sample_dir(alpha=alpha_enc)
+                fut_z = model_utils.compute_repr_from_clus_assign_prob(pi_assign=fut_pi, c_means=self.c_means, log_c_vars=self.log_c_vars)
 
                 # Update Cell State
-                h = self._cell_update_pass(h=h, x=gen_x_t, z=est_z)
+                fut_h = self._cell_update_pass(h=fut_h, x=gen_x_t, z=fut_z)
 
                 # Compute Loss Terms
                 future_loglik = LM_utils.torch_log_Gauss_likelihood(x=gen_x_t, mu=_est_mean, logvar=_est_logvar, device=self.device)
@@ -404,8 +410,8 @@ class DirVRNN(nn.Module):
 
                 # Append objects to future tracker if we are in evaluation mode
                 if mode == "eval":
-                    future["pis"][:, outer_t_idx, :] = est_pi
-                    future["zs"][:, outer_t_idx, :] = est_z
+                    future["pis"][:, outer_t_idx, :] = fut_pi
+                    future["zs"][:, outer_t_idx, :] = fut_z
                     future["alpha_encs"][:, outer_t_idx, :] = alpha_enc
 
                     # Append generate mean, generate var
@@ -419,7 +425,7 @@ class DirVRNN(nn.Module):
 
 
         # Once everything is computed, make predictions on outcome and compute loss
-        y_pred = self._predictor_pass(z=est_z)
+        y_pred = self._predictor_pass(z=fut_z)
         pred_loss = LM_utils.torch_CatCE(y_true=y, y_pred=y_pred)
         ELBO += pred_loss
         Loss_outl += pred_loss
@@ -433,7 +439,10 @@ class DirVRNN(nn.Module):
             history["loss_out"] = Loss_outl
             future["loss_out"] = Loss_outl
 
-        return (-1) * ELBO, Loss_loglik, Loss_kl, Loss_outl, history, future  # want to maximize ELBO, so return - ELBO
+        # Convert ELBO to -1 * ELBO since we want to maximize ELBO
+        loss = (-1) * ELBO
+
+        return loss, Loss_loglik, Loss_kl, Loss_outl, history, future  # want to maximize ELBO, so return - ELBO
 
 
     # Define method to train model on given data
@@ -491,8 +500,11 @@ class DirVRNN(nn.Module):
             save_dir=exp_save_dir, 
             class_names=class_names, 
             K_fold_idx=K_fold_idx, 
-            loss_headers=["loss", "loss_loglik", "loss_kl", "loss_out"]
+            loss_names=["loss", "loss_loglik", "loss_kl", "loss_out"]
         )
+
+        # Printing Message
+        print("Printing Losses loss, Log Lik, KL, Outl")
 
         # ================== TRAINING-VALIDATION LOOP ==================
         for epoch in range(1, num_epochs + 1):
@@ -532,10 +544,11 @@ class DirVRNN(nn.Module):
             # Take average over all batches in the train data
             ep_loss, ep_loglik, ep_kl, ep_outl = tr_loss / len(train_loader), tr_loglik / len(train_loader), tr_kl / len(train_loader), tr_outl / len(train_loader)
 
+
             # Print Message at the end of each epoch with the main loss and all auxiliary loss functions
             print(
-                "Train {} ({:.0f}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - outl {:.2f}]".format(
-                    epoch, 100, ep_loss, ep_loglik, ep_kl, ep_outl
+                "Epoch {} :  {:.2f} - {:.2f} - {:.2f} - {:.2f}".format(
+                    epoch, 100, ep_loss.item(), ep_loglik.item(), ep_kl.item(), ep_outl.item()
                 ),
                 end="     ",
             )
@@ -566,10 +579,10 @@ class DirVRNN(nn.Module):
 
                         # print message
                         print(
-                            "Val {} ({:.0f}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - outl {:.2f}]".format(
+                            "Val {} ({:.0f}%): {:.2f} - {:.2f} - {:.2f} - {:.2f}".format(
                                 epoch, 100, val_loss.item(), val_loglik.item(), val_kl.item(), val_outl.item()
                             ),
-                            end="     ",
+                            end="\n",
                         )
 
                         # ============= SCORE COMPUTATION =============

@@ -90,7 +90,7 @@ def _convert_prob_to_score(x: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarr
 
 def _convert_scores_to_prob(x: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
     """
-    Convert score predictions to probability values using the x / 1 + x conversion.
+    Convert score predictions to probability values using the x / 1 + x conversion and then normalizing (weighting scores might not lead necessarily to summing probability values).
 
     Args:
         - x (np.ndarray or torch.Tensor): array of score values > 0

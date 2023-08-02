@@ -1,0 +1,107 @@
+Loading and Processing Data...
+Data MIMIC successfully loaded for features ['DBP', 'ESI', 'HR', 'RR', 'SBP', 'SPO2', 'TEMP', 'age', 'gender'] and outcomes ['Death', 'Discharge', 'ICU', 'Ward'].
+(X, y) shape: (8328, 10, 9), (8328, 4)
+Outcome Distribution: Death          26
+Discharge    2860
+ICU          1321
+Ward         4121
+dtype: int64
+Loading and Training Model for fold 1...
+ Logging experiments in exps/DirVRNN/Run_33_2023-08-02_18-00-50/fold_1
+batch_loss tensor([96.9754], grad_fn=<MulBackward0>)
+batch loss after backward tensor([96.9754], grad_fn=<MulBackward0>)
+batch loss item 96.97540283203125
+tr_loss before tensor([0.]).0]
+tr_loss tensor([96.9754])
+batch_loss tensor([97.1463], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.1463], grad_fn=<MulBackward0>)
+batch loss item 97.14634704589844
+tr_loss before tensor([96.9754])
+tr_loss tensor([194.1217])
+batch_loss tensor([97.1620], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.1620], grad_fn=<MulBackward0>)
+batch loss item 97.16201782226562
+tr_loss before tensor([194.1217])
+tr_loss tensor([291.2838])
+batch_loss tensor([97.5348], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.5348], grad_fn=<MulBackward0>)
+batch loss item 97.53479766845703
+tr_loss before tensor([291.2838])
+tr_loss tensor([388.8185])
+batch_loss tensor([97.1874], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.1874], grad_fn=<MulBackward0>)
+batch loss item 97.18737030029297
+tr_loss before tensor([388.8185])
+tr_loss tensor([486.0059])
+batch_loss tensor([97.0382], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.0382], grad_fn=<MulBackward0>)
+batch loss item 97.03819274902344
+tr_loss before tensor([486.0059])
+tr_loss tensor([583.0441])
+batch_loss tensor([97.5358], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.5358], grad_fn=<MulBackward0>)
+batch loss item 97.53577423095703
+tr_loss before tensor([583.0441])
+tr_loss tensor([680.5799])
+batch_loss tensor([97.4048], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.4048], grad_fn=<MulBackward0>)
+batch loss item 97.40479278564453
+tr_loss before tensor([680.5799])
+tr_loss tensor([777.9847])
+batch_loss tensor([97.7741], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.7741], grad_fn=<MulBackward0>)
+batch loss item 97.77413177490234
+tr_loss before tensor([777.9847])
+tr_loss tensor([875.7588])
+batch_loss tensor([97.1556], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.1556], grad_fn=<MulBackward0>)
+batch loss item 97.15555572509766
+tr_loss before tensor([875.7588])
+tr_loss tensor([972.9144])
+batch_loss tensor([97.3662], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.3662], grad_fn=<MulBackward0>)
+batch loss item 97.36618041992188
+tr_loss before tensor([972.9144])
+tr_loss tensor([1070.2805])
+batch_loss tensor([97.8809], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.8809], grad_fn=<MulBackward0>)
+batch loss item 97.88091278076172
+tr_loss before tensor([1070.2805])
+tr_loss tensor([1168.1614])
+batch_loss tensor([97.2530], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.2530], grad_fn=<MulBackward0>)
+batch loss item 97.25304412841797
+tr_loss before tensor([1168.1614])
+tr_loss tensor([1265.4144])
+batch_loss tensor([96.9497], grad_fn=<MulBackward0>)
+batch loss after backward tensor([96.9497], grad_fn=<MulBackward0>)
+batch loss item 96.94965362548828
+tr_loss before tensor([1265.4144])
+tr_loss tensor([1362.3641])
+batch_loss tensor([97.8164], grad_fn=<MulBackward0>)
+Traceback (most recent call last):
+  File "/home/ball4537/anaconda3/envs/dirvrnn-env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/ball4537/anaconda3/envs/dirvrnn-env/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/dirvrnn_run.py", line 125, in <module>
+    main()
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/dirvrnn_run.py", line 99, in main
+    model.fit(train_data=(X_train, y_train), val_data=(X_val, y_val),
+  File "/home/ball4537/PycharmProjects/VarPhenClustering/src/models/DirVRNN.py", line 552, in fit
+    "Train {} ({}%):  [loss {:.2f} - loglik {:.2f} - kl {:.2f} - outl {:.2f}]".format(
+TypeError: unsupported format string passed to numpy.ndarray.__format__
+batch loss after backward tensor([97.8164], grad_fn=<MulBackward0>)
+batch loss item 97.81639099121094
+tr_loss before tensor([1362.3641])
+tr_loss tensor([1460.1805])
+batch_loss tensor([97.3372], grad_fn=<MulBackward0>)
+batch loss after backward tensor([97.3372], grad_fn=<MulBackward0>)
+batch loss item 97.33724212646484
+tr_loss before tensor([1460.1805])
+tr_loss tensor([1557.5178])
+Epoch Losses
+tensor([97.3449])
+tensor([-99.6419])
+tensor([-0.9297])
+tensor([1.3673])
