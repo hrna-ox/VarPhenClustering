@@ -1,0 +1,2 @@
+epoch,loss,loss_loglik,loss_kl,loss_out
+1,tensor([105.0468]),tensor([6.5147]),tensor([-100.6595]),tensor([2.1274])

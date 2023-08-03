@@ -656,7 +656,7 @@ class DirVRNN(nn.Module):
             save_dir=exp_save_dir, 
             class_names=class_names, 
             K_fold_idx=K_fold_idx, 
-            loss_headers=["loss", "loss_loglik", "loss_kl", "loss_out"]
+            loss_names=["loss", "loss_loglik", "loss_kl", "loss_out"]
         )
         wandb.watch(models=self, log="all", log_freq=1, idx=K_fold_idx)           
 

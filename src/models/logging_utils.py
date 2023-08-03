@@ -183,6 +183,7 @@ class ClassifierLogger(BaseLogger):
 
         # Initialize supervised score trackers
         self._init_supervised_score_trackers(subdir="train")
+        self._init_supervised_score_trackers(subdir="val")
         self._init_supervised_score_trackers(subdir="test")
     
     def _init_supervised_score_trackers(self, subdir: str = "train"):
@@ -219,6 +220,9 @@ class ClassifierLogger(BaseLogger):
         # Get Subfolder within experiment based on the mode
         cur_save_fd = f"{self.exp_save_dir}/{subdir}"
 
+        # Make csvs if they do not exists
+        self._init_supervised_score_trackers(subdir=subdir)
+
         # Log accuracy
         if "accuracy" in scores_dic.keys():
             _write_to_csv_if_exists(f"{cur_save_fd}/accuracy.csv", [iter, scores_dic["accuracy"]])
@@ -247,6 +251,7 @@ class ClusteringLogger(BaseLogger):
 
         # Initialize unsupervised score trackers
         self._init_unsupervised_score_trackers(subdir="train")
+        self._init_unsupervised_score_trackers(subdir="val")
         self._init_unsupervised_score_trackers(subdir="test")
 
 
@@ -290,6 +295,9 @@ class ClusteringLogger(BaseLogger):
 
         # Get Subfolder within experiment based on the mode
         cur_save_fd = f"{self.exp_save_dir}/{subdir}"
+
+        # Make csvs if they do not exists
+        self._init_unsupervised_score_trackers(subdir=subdir)
 
         # If clustering is not temporal then combine metrics into single CSV
         if not self._clus_is_temp:
@@ -354,6 +362,8 @@ class DLLogger(BaseLogger):
         - epoch: current epoch for training. This parameter is disregarded if mode is set to 'test'.
         - subdir: str indicating the subdir the logger is for testing or validation or training.
         """
+        # Make csvs if they do not exists
+        self._init_loss_trackers(subdir=subdir)
 
         # Add epoch information to losses dictionary at the beginning
         losses_as_dict = {f"{subdir}/{self.loss_names[i]}": losses[i] for i in range(len(self.loss_names))}

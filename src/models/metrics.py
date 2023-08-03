@@ -523,7 +523,7 @@ def get_multiclass_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: U
         "precision": precision,
         "roc_auc": roc_auc,
         "pr_auc": pr_auc,
-        "conf_matrix": conf_matrix
+        "confusion_matrix": conf_matrix
     }
 # endregion 
 
