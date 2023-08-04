@@ -1,0 +1,6 @@
+epoch,train_neg ELBO,train_Log Lik,train_KL,train_Outcome,val_neg ELBO,val_Log Lik,val_KL,val_Outcome
+1,tensor([97.4867]),tensor([-93.4867]),tensor([5.3224]),tensor([1.3224]),tensor([97.3034]),tensor([-93.3109]),tensor([5.2936]),tensor([1.3011])
+2,tensor([97.4445]),tensor([-93.4392]),tensor([5.3114]),tensor([1.3061]),tensor([97.2037]),tensor([-93.1964]),tensor([5.3794]),tensor([1.3721])
+3,tensor([97.4053]),tensor([-93.3935]),tensor([5.3137]),tensor([1.3019]),tensor([97.0617]),tensor([-93.1154]),tensor([5.3299]),tensor([1.3836])
+4,tensor([97.3689]),tensor([-93.3662]),tensor([5.3249]),tensor([1.3222]),tensor([97.1504]),tensor([-93.0815]),tensor([5.3614]),tensor([1.2924])
+5,tensor([97.3451]),tensor([-93.3686]),tensor([5.3005]),tensor([1.3239]),tensor([97.2685]),tensor([-93.3488]),tensor([5.2555]),tensor([1.3358])

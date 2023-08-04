@@ -6,18 +6,19 @@ This file defines the main proposed model, and how to train the model.
 """
 
 # ============= IMPORT LIBRARIES ==============
+import pickle
 import torch
 import torch.nn as nn
 import wandb
 
-from typing import Dict, Union
+from typing import Dict, List, Union
 from torch.utils.data import DataLoader, TensorDataset
 
 import src.models.loss_functions as LM_utils
 from src.models.deep_learning_base_classes import MLP, LSTM_Dec_v1
 
 import src.models.model_utils as model_utils
-from src.models.logging_utils import DirVRNNLogger as logger
+import src.models.logging_utils as log_utils
 import src.models.metrics as metrics
 
 
@@ -47,6 +48,7 @@ class DirVRNN(nn.Module):
         dropout: float = 0.0,
         device: str = "cpu",
         seed: int = 42,
+        K_fold_idx: int = 1,
         **kwargs,
     ):
         """
@@ -65,6 +67,7 @@ class DirVRNN(nn.Module):
             - dropout: dropout rate for MLPs (default = 0.0, i.e. no dropout).
             - device: device to use for computations (default = 'cpu').
             - seed: random seed for reproducibility (default = 42).
+            - K_fold_idx: index of the K-fold cross-validation (default = 1).
             - kwargs: additional arguments for compatibility.
         """
         super().__init__()
@@ -80,6 +83,7 @@ class DirVRNN(nn.Module):
         self.gate_n = gate_num_hidden_nodes
         self.device = device
         self.seed = seed
+        self.K_fold_idx = K_fold_idx
 
         # Initialize Cluster Mean and Variance Parameters
         self.c_means = nn.Parameter(
@@ -175,6 +179,9 @@ class DirVRNN(nn.Module):
             dropout=dropout,
         )
         self.cell_update_output_fn = nn.ReLU()
+
+        # Placeholder for loss function names
+        self.__loss_names = ["neg ELBO", "Log Lik", "KL", "Outcome"]
 
 
     
@@ -451,8 +458,7 @@ class DirVRNN(nn.Module):
         train_data, val_data,
         lr: float = 0.001,
         batch_size: int = 32,
-        num_epochs: int = 100,
-        save_params: Union[Dict, None] = None
+        num_epochs: int = 100
     ):
         """
         Method to train model given train and validation data, as well as training parameters.
@@ -463,9 +469,6 @@ class DirVRNN(nn.Module):
             - lr: learning rate for optimizer.
             - batch_size: batch size for training.
             - num_epochs: number of epochs to train for.
-            - save_params: dictionary of parameters for saving. See src.models.logging_utils for more details. Pertains data saving. If None, then no saving is performed. Includes:
-                - K_fold_idx: index of K-fold cross-validation.
-                - class_names: list of class names.
 
         Outputs:
             - loss: final loss value.
@@ -473,25 +476,21 @@ class DirVRNN(nn.Module):
         """
 
         # ================== INITIALIZATION ==================
-        self._train_loss_tracker, self._val_loss_tracker = {}, {}
-        self._val_exp_obj_tracker = {}
-        self._val_supervised_scores = {}
-        self._val_supervised_scores_lachiche_algo = {}
-        self._val_clus_quality_scores = {}
-        self._val_clus_assign_scores = {}
+        epoch_range = range(1, num_epochs + 1)
+        self._train_loss_tracker = {epoch: [] for epoch in epoch_range}
+        self._val_loss_tracker = {epoch: [] for epoch in epoch_range}
+        self._val_exp_obj_tracker = {epoch: {} for epoch in epoch_range}
+        self._val_supervised_scores = {epoch: {} for epoch in epoch_range}
+        self._val_supervised_scores_lachiche_algo = {epoch: {} for epoch in epoch_range}
+        self._val_clus_quality_scores = {epoch: {} for epoch in epoch_range}
+        self._val_clus_assign_scores = {epoch: {} for epoch in epoch_range}
+
+        self.lr = lr
+        self.batch_size = batch_size
+        self.num_epochs = num_epochs
 
 
         # ================== DATA PREPARATION ==================
-
-        # Unpack Save Parameters
-        if save_params is not None:
-            class_names = save_params["class_names"]
-            K_fold_idx = save_params["K_fold_idx"]
-        
-        else:
-            class_names = [f"class_{i}" for i in range(self.num_classes)]
-            K_fold_idx = 1
-
 
         # Unpack data and make data loaders
         X_train, y_train = train_data
@@ -502,16 +501,7 @@ class DirVRNN(nn.Module):
 
         # Define optimizer and Logging of weights
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        wandb.watch(models=self, log="all", log_freq=1, idx=K_fold_idx)           
-
-        # # Initialize logger object
-        # exp_save_dir = f"exps/DirVRNN"
-        # log = logger(
-        #     save_dir=exp_save_dir, 
-        #     class_names=class_names, 
-        #     K_fold_idx=K_fold_idx, 
-        #     loss_names=["loss", "loss_loglik", "loss_kl", "loss_out"]
-        # )
+        wandb.watch(models=self, log="all", log_freq=1, idx=self.K_fold_idx)           
 
         # Printing Message
         print("Printing Losses loss, Log Lik, KL, Outl")
@@ -557,14 +547,14 @@ class DirVRNN(nn.Module):
 
             # Print Message at the end of each epoch with the main loss and all auxiliary loss functions
             print(
-                "Epoch {} :  {:.2f} - {:.2f} - {:.2f} - {:.2f}".format(
-                    epoch, 100, ep_loss.item(), ep_loglik.item(), ep_kl.item(), ep_outl.item()
+                "Epoch {} ({}) :  {:.2f} - {:.2f} - {:.2f} - {:.2f}".format(
+                    epoch, self.num_epochs, ep_loss.item(), ep_loglik.item(), ep_kl.item(), ep_outl.item()
                 ),
                 end="     ",
             )            
 
             # ============== LOGGING ==============
-            self._train_loss_tracker[epoch] = (ep_loss, ep_loglik, ep_kl, ep_outl)
+            self._train_loss_tracker[epoch] = [ep_loss, ep_loglik, ep_kl, ep_outl]
 
 
             # ============= VALIDATION =============
@@ -588,8 +578,8 @@ class DirVRNN(nn.Module):
 
                         # print message
                         print(
-                            "Val {} ({:.0f}%): {:.2f} - {:.2f} - {:.2f} - {:.2f}".format(
-                                epoch, 100, val_loss.item(), val_loglik.item(), val_kl.item(), val_outl.item()
+                            "Val {} ({}): {:.2f} - {:.2f} - {:.2f} - {:.2f}".format(
+                                epoch, self.num_epochs, val_loss.item(), val_loglik.item(), val_kl.item(), val_outl.item()
                             ),
                             end="\n",
                         )
@@ -646,75 +636,37 @@ class DirVRNN(nn.Module):
                         }
 
 
-                        # log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores, subdir="val/supervised_scores")
-                        # log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores_lachiche_algo, subdir="val/supervised_scores_lachiche_algo")
-                        # log.log_clustering_performance(iter=epoch, scores_dic=history_clus_scores, subdir="val/unsupervised_scores")
-
         # Log Training and Validation Objects
-        self._val_exp_obj_tracker["train_data"] = train_data
-        self._val_exp_obj_tracker["val_data"] = val_data
-        self._val_exp_obj_tracker["fit_params"] = {
+        self._val_exp_obj_tracker["train_data"] = train_data # type: ignore
+        self._val_exp_obj_tracker["val_data"] = val_data # type: ignore
+        self._val_exp_obj_tracker["fit_params"] = { # type: ignore
             "num_epochs": num_epochs,
             "batch_size": batch_size,
             "lr": lr
         }
-        self._val_exp_obj_tracker["model_params"] = self.state_dict()
+        self._val_exp_obj_tracker["model_params"] = self.state_dict() # type: ignore
 
 
-
-
-
-
-        # # Save Training and Validation Outputs
-        # save_objects = {
-        #     "train_data": train_data,
-        #     "val_data": val_data,
-        #     "fit_params": {
-        #         "num_epochs": num_epochs,
-        #         "batch_size": batch_size,
-        #         "lr": lr
-        #     },
-        #     "model_params": self.state_dict()
-        # }              
-        # log.log_objects(objects=save_objects, save_name="experiment_config")
-
-    def predict(self, X, y, save_params: Union[None, Dict] = None):
+    def predict(self, X, y):
         """Similar to forward method, but focus on inner computations and tracking objects for the model."""
 
-
         # ================== INITIALIZATION ==================
-        self._test_loss = {}
-        self._test_exp_obj = {}
-        self._test_supervised_scores = {}
-        self._test_supervised_scores_lachiche_algo = {}
-        self._test_clus_quality_scores = {}
-        self._test_clus_assign_scores = {}
+        self._test_loss = {"test": []}
+        self._test_exp_obj = {"test": {}}
+        self._test_supervised_scores = {"test": {}}
+        self._test_supervised_scores_lachiche_algo = {"test": {}}
+        self._test_clus_quality_scores = {"test": {}}
+        self._test_clus_assign_scores = {"test": {}}
 
 
         # ================== DATA PREPARATION ==================
-
-        # Unpack Save Parameters
-        if save_params is not None:
-            class_names = save_params["class_names"]
-            K_fold_idx = save_params["K_fold_idx"]
-        
-        else:
-            class_names = [f"class_{i}" for i in range(self.num_classes)]
-            K_fold_idx = 1
 
         # Prepare Data
         test_data = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
         test_loader = DataLoader(test_data, batch_size=X.shape[0], shuffle=False)
 
-        # Initialize logger objects
-        exp_save_dir = f"exps/DirVRNN"
-        log = logger(
-            save_dir=exp_save_dir, 
-            class_names=class_names, 
-            K_fold_idx=K_fold_idx, 
-            loss_names=["loss", "loss_loglik", "loss_kl", "loss_out"]
-        )
-        wandb.watch(models=self, log="all", log_freq=1, idx=K_fold_idx)           
+        # # Initialize logger objects
+        # wandb.watch(models=self, log="all", log_freq=1, idx=self.K_fold_idx)           
 
         # Set model to evaluation mode
         self.eval()
@@ -762,7 +714,7 @@ class DirVRNN(nn.Module):
                 self._test_supervised_scores_lachiche_algo["test"]["history"] = history_sup_scores_lachiche_algo
                 self._test_clus_quality_scores["test"]["history"] = history_clus_qual_scores
                 self._test_clus_assign_scores["test"]["history"] = history_clus_label_scores
-                self._test_exp_obj["test"]["history"] = {
+                self._test_exp_obj["test"]["history"] = { # type: ignore
                     "y_pred": test_hist_y_pred,
                     "pis": test_hist_pis,
                     "zs": test_hist_zs
@@ -773,7 +725,7 @@ class DirVRNN(nn.Module):
                 self._test_supervised_scores_lachiche_algo["test"]["future"] = future_sup_scores_lachiche_algo
                 self._test_clus_quality_scores["test"]["future"] = future_clus_qual_scores
                 self._test_clus_assign_scores["test"]["future"] = future_clus_label_scores
-                self._test_exp_obj["test"]["future"] = {
+                self._test_exp_obj["test"]["future"] = { # type: ignore
                     "y_pred": test_fut_y_pred,
                     "pis": test_fut_pis,
                     "zs": test_fut_zs
@@ -781,25 +733,253 @@ class DirVRNN(nn.Module):
 
 
         # Log model params, model and other objects
-        self._test_exp_obj["test"]["test_data"] = (X, y)
-        self._test_exp_obj["test"]["clus_params"] = {
+        self._test_exp_obj["test"]["test_data"] = (X, y) # type: ignore
+        self._test_exp_obj["test"]["clus_params"] = { # type: ignore
             "c_means": self.c_means,
             "log_c_vars": self.log_c_vars
         }
-        self._test_exp_obj["test"]["model_params"] = self.state_dict()
-        self._test_exp_obj["test"]["save_params"] = save_params
+        self._test_exp_obj["test"]["model_params"] = self.state_dict() # type: ignore
+        self._test_exp_obj["test"]["outputs_history"] = test_history  # type: ignore
+        self._test_exp_obj["test"]["outputs_future"] = test_future # type: ignore
         
-        # save_objects = {
-        #     "test_data": (X, y),
-        #     "clus_params": {
-        #         "c_means": self.c_means,
-        #         "log_c_vars": self.log_c_vars
-        #     },
-        #     "model_params": self.state_dict(),
-        #     "save_params": save_params
-        # }
+        # Get output
+        output_dir = self._test_exp_obj["test"] 
 
-        # log.log_objects(objects=save_objects, save_name="test_output")
+        return output_dir
+    
+    def log_training_files(self, class_names: List = []):
+        """Log training and validation losses to csv file."""
 
-        return {**output_dir, **save_objects}
+        # Initialize directory for saving
+        main_dir = "exps/DirVRNN/"
+        exp_save_dir = log_utils.log_new_run_dir(save_dir=main_dir, K_fold_idx=self.K_fold_idx)
+
+        # ================== LOG LOSSES ==================
+
+        # Get Loss CSV Header
+        train_loss_names = [f"train_{loss}" for loss in self.__loss_names]
+        val_loss_names = [f"val_{loss}" for loss in self.__loss_names]
+        loss_csv_header = ["epoch"] + train_loss_names + val_loss_names
+
+        # Create CSV file if it doesn't exist
+        loss_csv_path = f"{exp_save_dir}/losses.csv"
+        log_utils.make_csv_if_not_exist(save_path=loss_csv_path, header=loss_csv_header)
+
+        # Log to CSV iterating over epochs
+        for epoch in range(1, self.num_epochs + 1):
+
+            # Access items
+            train_loss_values = [loss.item() for loss in self._train_loss_tracker[epoch]]
+            val_loss_values = [loss.item() for loss in self._val_loss_tracker[epoch]]
+
+            # Log to csv
+            row = [epoch] + train_loss_values + val_loss_values
+            log_utils.write_to_csv_if_exists(save_path=loss_csv_path, data=row)
+
+        
+        # ================== LOG Supervised Scores ==================
+        if class_names == []:
+            outcome_names = ["C_{i}" for i in range(self.num_classes)]
+        else:
+            outcome_names = class_names
+
+        # Get Score CSV Headers
+        val_acc_csv_header = ["epoch"] + ["val_acc"]
+        val_multiclass_csv_header = ["epoch"] + outcome_names
+        val_cm_csv_header = ["epoch"] + [f"Tr_{i}_Pr_{j}" for j in outcome_names for i in outcome_names]
+
+        # Save scores for each of "history" and "future" objects
+        for time_period in ["history", "future"]:
+                
+            # Create CSV files if they don't exist
+            val_acc_csv_path = f"{exp_save_dir}/val_acc_{time_period}.csv"
+            val_acc_lachiche_algo_csv_path = f"{exp_save_dir}/val_acc_lachiche_algo_{time_period}.csv"
+            log_utils.make_csv_if_not_exist(save_path=val_acc_csv_path, header=val_acc_csv_header)
+            log_utils.make_csv_if_not_exist(save_path=val_acc_lachiche_algo_csv_path, header=val_acc_csv_header)
+            
+            val_cm_csv_path = f"{exp_save_dir}/val_cm_{time_period}.csv"
+            val_cm_lachiche_algo_csv_path = f"{exp_save_dir}/val_cm_lachiche_algo_{time_period}.csv"
+            log_utils.make_csv_if_not_exist(save_path=val_cm_csv_path, header=val_cm_csv_header)
+            log_utils.make_csv_if_not_exist(save_path=val_cm_lachiche_algo_csv_path, header=val_cm_csv_header)
+
+            # Iterate over target metrics
+            for metric in log_utils.CLASS_METRICS:
+                val_metric_csv_path = f"{exp_save_dir}/val_{metric}_{time_period}.csv"
+                val_metric_lachiche_algo_csv_path = f"{exp_save_dir}/val_{metric}_lachiche_algo_{time_period}.csv"
+                log_utils.make_csv_if_not_exist(save_path=val_metric_csv_path, header=val_multiclass_csv_header)
+                log_utils.make_csv_if_not_exist(save_path=val_metric_lachiche_algo_csv_path, header=val_multiclass_csv_header)
+
+            # Log to CSV iterating over epochs
+            for epoch in range(1, self.num_epochs + 1):
+                
+                # Access items
+                val_acc_row_to_write = [epoch] + [self._val_supervised_scores[epoch][time_period]["accuracy"]]
+                log_utils.write_to_csv_if_exists(save_path=val_acc_csv_path, data=val_acc_row_to_write)
+
+                val_cm_row_to_write = [epoch] + self._val_supervised_scores[epoch][time_period]["confusion_matrix"].flatten().tolist()
+                log_utils.write_to_csv_if_exists(save_path=val_cm_csv_path, data=val_cm_row_to_write)
+
+                # Iterate over target multiclass metrics
+                for metric in log_utils.CLASS_METRICS:
+                    val_metric_row_to_write = [epoch] + self._val_supervised_scores[epoch][time_period][metric]
+                    log_utils.write_to_csv_if_exists(save_path=f"{exp_save_dir}/val_{metric}_{time_period}.csv", data=val_metric_row_to_write)
+
+                # Do the same for Lachiche Algo scores
+                val_acc_lachiche_algo_row_to_write = [epoch] + [self._val_supervised_scores_lachiche_algo[epoch][time_period]["accuracy"]]
+                log_utils.write_to_csv_if_exists(save_path=val_acc_lachiche_algo_csv_path, data=val_acc_lachiche_algo_row_to_write)
+
+                val_cm_lachiche_algo_row_to_write = [epoch] + self._val_supervised_scores_lachiche_algo[epoch][time_period]["confusion_matrix"].flatten().tolist()
+                log_utils.write_to_csv_if_exists(save_path=val_cm_lachiche_algo_csv_path, data=val_cm_lachiche_algo_row_to_write)
+
+                # Iterate over target multiclass metrics
+                for metric in log_utils.CLASS_METRICS:
+                    val_metric_lachiche_algo_row_to_write = [epoch] + self._val_supervised_scores_lachiche_algo[epoch][time_period][metric]
+                    log_utils.write_to_csv_if_exists(save_path=f"{exp_save_dir}/val_{metric}_lachiche_algo_{time_period}.csv", data=val_metric_lachiche_algo_row_to_write)
+
+
+        # ================== LOG Clustering Scores ==================
+
+        # Get Score CSV Headers
+        val_clus_qual_csv_header = ["epoch"] + log_utils.CLUS_QUALITY_METRICS
+        val_clus_assign_csv_header = ["epoch"] + log_utils.CLUS_ASSIGN_METRICS
+
+        # Save scores for each of "history" and "future" objects
+        for time_period in ["history", "future"]:
+
+            # Create CSV files if they don't exist
+            val_clus_qual_csv_path = f"{exp_save_dir}/val_clus_qual_{time_period}.csv"
+            log_utils.make_csv_if_not_exist(save_path=val_clus_qual_csv_path, header=val_clus_qual_csv_header)
+
+            val_clus_assign_csv_path = f"{exp_save_dir}/val_clus_assign_{time_period}.csv"
+            log_utils.make_csv_if_not_exist(save_path=val_clus_assign_csv_path, header=val_clus_assign_csv_header)
+
+            # Log to CSV iterating over epochs
+            for epoch in range(1, self.num_epochs + 1):
+                
+                # Access items
+                val_clus_qual_row_to_write = [epoch] + list(self._val_clus_quality_scores[epoch][time_period].values())
+                log_utils.write_to_csv_if_exists(save_path=val_clus_qual_csv_path, data=val_clus_qual_row_to_write)
+
+                val_clus_assign_row_to_write = [epoch] + list(self._val_clus_assign_scores[epoch][time_period].values())
+                log_utils.write_to_csv_if_exists(save_path=val_clus_assign_csv_path, data=val_clus_assign_row_to_write)
+
+        # Print Message
+        print(f"Saved experiment training logs to {exp_save_dir}")
+
+        return exp_save_dir, outcome_names
+    
+    def log_prediction_to_files(self, exp_save_dir: str, outcome_names: List = []):
+        """
+        Logs the predictions of the model to csv files
+
+        Args:
+            exp_save_dir (str): The directory to save the experiment to
+            outcome_names (List, optional): The names of the outcomes. Defaults to [].
+        """
+
+        if outcome_names == []:
+            outcome_names = ["C_{i}" for i in range(self.num_classes)]
+
+
+        # ================== LOG Test Losses ==================
+
+        # Get Loss CSV Headers
+        test_loss_csv_header = ["mode"] + self.__loss_names
+        test_loss_csv_path = f"{exp_save_dir}/test_losses.csv"
+        log_utils.make_csv_if_not_exist(test_loss_csv_path, test_loss_csv_header)
+
+        # Log results to CSV
+        test_loss_to_write = ["test"] + [loss.item() for loss in self._test_loss["test"]]
+        log_utils.write_to_csv_if_exists(save_path=test_loss_csv_path, data=test_loss_to_write)
+
+        # ================== LOG Supervised Scores ==================
+
+        # Get Score CSV Headers
+        test_acc_csv_header = ["mode"] + ["test_acc"]
+        test_multiclass_csv_header = ["mode"] + outcome_names
+        test_cm_csv_header = ["mode"] + [f"Tr_{i}_Pr_{j}" for j in outcome_names for i in outcome_names]
+        
+        # Iterate over time period
+        for time_period in ["history", "future"]:
+            
+            # Create CSV files if they don't exist
+            test_acc_csv_path = f"{exp_save_dir}/test_acc_{time_period}.csv"
+            test_acc_lachiche_algo_csv_path = f"{exp_save_dir}/test_acc_lachiche_algo_{time_period}.csv"
+            log_utils.make_csv_if_not_exist(save_path=test_acc_csv_path, header=test_acc_csv_header)
+            log_utils.make_csv_if_not_exist(save_path=test_acc_lachiche_algo_csv_path, header=test_acc_csv_header)
+
+            test_cm_csv_path = f"{exp_save_dir}/test_cm_{time_period}.csv"
+            test_cm_lachiche_algo_csv_path = f"{exp_save_dir}/test_cm_lachiche_algo_{time_period}.csv"
+            log_utils.make_csv_if_not_exist(save_path=test_cm_csv_path, header=test_cm_csv_header)
+            log_utils.make_csv_if_not_exist(save_path=test_cm_lachiche_algo_csv_path, header=test_cm_csv_header)
+
+            # Iterate over target metrics
+            for metric in log_utils.CLASS_METRICS:
+                test_metric_csv_path = f"{exp_save_dir}/test_{metric}_{time_period}.csv"
+                test_metric_lachiche_algo_csv_path = f"{exp_save_dir}/test_{metric}_lachiche_algo_{time_period}.csv"
+                log_utils.make_csv_if_not_exist(save_path=test_metric_csv_path, header=test_multiclass_csv_header)
+                log_utils.make_csv_if_not_exist(save_path=test_metric_lachiche_algo_csv_path, header=test_multiclass_csv_header)
+
+            # Log to CSV
+            test_acc_row_to_write = ["test"] + [self._test_supervised_scores["test"][time_period]["accuracy"]]
+            log_utils.write_to_csv_if_exists(save_path=test_acc_csv_path, data=test_acc_row_to_write)
+
+            test_cm_row_to_write = ["test"] + self._test_supervised_scores["test"][time_period]["confusion_matrix"].flatten().tolist()
+            log_utils.write_to_csv_if_exists(save_path=test_cm_csv_path, data=test_cm_row_to_write)
+
+            # Iterate over target multiclass metrics
+            for metric in log_utils.CLASS_METRICS:
+                test_metric_row_to_write = ["test"] + self._test_supervised_scores["test"][time_period][metric]
+                log_utils.write_to_csv_if_exists(save_path=f"{exp_save_dir}/test_{metric}_{time_period}.csv", data=test_metric_row_to_write)
+
+            # Do the same for Lachiche Algorithm
+            test_acc_lachiche_algo_row_to_write = ["test"] + [self._test_supervised_scores_lachiche_algo["test"][time_period]["accuracy"]]
+            log_utils.write_to_csv_if_exists(save_path=test_acc_lachiche_algo_csv_path, data=test_acc_lachiche_algo_row_to_write)
+
+            test_cm_lachiche_algo_row_to_write = ["test"] + self._test_supervised_scores_lachiche_algo["test"][time_period]["confusion_matrix"].flatten().tolist()
+            log_utils.write_to_csv_if_exists(save_path=test_cm_lachiche_algo_csv_path, data=test_cm_lachiche_algo_row_to_write)
+
+            # Iterate over target multiclass metrics
+            for metric in log_utils.CLASS_METRICS:
+                test_metric_lachiche_algo_row_to_write = ["test"] + self._test_supervised_scores_lachiche_algo["test"][time_period][metric]
+                log_utils.write_to_csv_if_exists(save_path=f"{exp_save_dir}/test_{metric}_lachiche_algo_{time_period}.csv", data=test_metric_lachiche_algo_row_to_write)
+
+        # ================== LOG Clustering Scores ==================
+
+        # Get Score CSV Headers
+        test_clus_qual_csv_header = ["mode"] + log_utils.CLUS_QUALITY_METRICS
+        test_clus_assign_csv_header = ["mode"] + log_utils.CLUS_ASSIGN_METRICS
+
+        # Save scores for each of "history" and "future" objects
+        for time_period in ["history", "future"]:
+
+            # Create CSV files if they don't exist
+            test_clus_qual_csv_path = f"{exp_save_dir}/test_clus_qual_{time_period}.csv"
+            log_utils.make_csv_if_not_exist(save_path=test_clus_qual_csv_path, header=test_clus_qual_csv_header)
+
+            test_clus_assign_csv_path = f"{exp_save_dir}/test_clus_assign_{time_period}.csv"
+            log_utils.make_csv_if_not_exist(save_path=test_clus_assign_csv_path, header=test_clus_assign_csv_header)
+
+            # Log to CSV
+            test_clus_qual_row_to_write = ["test"] + list(self._test_clus_quality_scores["test"][time_period].values())
+            log_utils.write_to_csv_if_exists(save_path=test_clus_qual_csv_path, data=test_clus_qual_row_to_write)
+
+            test_clus_assign_row_to_write = ["test"] + list(self._test_clus_assign_scores["test"][time_period].values())
+            log_utils.write_to_csv_if_exists(save_path=test_clus_assign_csv_path, data=test_clus_assign_row_to_write)#
+
+        
+        # ================== LOG OBJECTS ==================
+        
+        # Save test results to pickle file
+        test_results = self._test_exp_obj
+        test_results_path = f"{exp_save_dir}/test_results.pkl"
+
+        with open(test_results_path, "wb") as f:
+            pickle.dump(test_results, f)
+
+        
+        # Print Message
+        print(f"Saved experiment test logs to {exp_save_dir}")
+            
+
 # endregion

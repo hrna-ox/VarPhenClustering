@@ -374,7 +374,7 @@ def main():
         os.makedirs(process_fd)
 
     # Save for input
-    vitals_final.to_csv(process_fd + "X_process.csv", index=False, header=True)
+    vitals_final.to_csv(process_fd + "vitals_process.csv", index=False, header=True)
     admissions_final.to_csv(process_fd + "admissions_process.csv", index=False, header=True)
     oh_outcomes.to_csv(process_fd + f"outcomes_process.csv", index=False, header=True)
     # endregion

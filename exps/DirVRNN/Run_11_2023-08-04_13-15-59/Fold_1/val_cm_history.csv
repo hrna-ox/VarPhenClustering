@@ -1,0 +1,6 @@
+epoch,Tr_Death_Pr_Death,Tr_Discharge_Pr_Death,Tr_ICU_Pr_Death,Tr_Ward_Pr_Death,Tr_Death_Pr_Discharge,Tr_Discharge_Pr_Discharge,Tr_ICU_Pr_Discharge,Tr_Ward_Pr_Discharge,Tr_Death_Pr_ICU,Tr_Discharge_Pr_ICU,Tr_ICU_Pr_ICU,Tr_Ward_Pr_ICU,Tr_Death_Pr_Ward,Tr_Discharge_Pr_Ward,Tr_ICU_Pr_Ward,Tr_Ward_Pr_Ward
+1 0.0 0.0 0.0 1.0 67.0 8.0 0.0 269.0 32.0 6.0 0.0 123.0 89.0 16.0 0.0 389.0
+2 0.0 0.0 0.0 1.0 26.0 177.0 0.0 141.0 6.0 89.0 0.0 66.0 27.0 279.0 0.0 188.0
+3 1.0 0.0 0.0 0.0 67.0 18.0 0.0 259.0 29.0 5.0 0.0 127.0 95.0 24.0 0.0 375.0
+4 0.0 0.0 0.0 1.0 28.0 299.0 0.0 17.0 15.0 139.0 0.0 7.0 39.0 424.0 0.0 31.0
+5 0.0 1.0 0.0 0.0 64.0 157.0 0.0 123.0 37.0 68.0 0.0 56.0 128.0 201.0 0.0 165.0

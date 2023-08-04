@@ -516,7 +516,7 @@ def get_multiclass_sup_scores(y_true: Union[np.ndarray, torch.Tensor], y_pred: U
 
     # Return dictionary of scores
     return {
-        "acc": acc,
+        "accuracy": acc,
         "macro_f1": macro_f1,
         "micro_f1": micro_f1,
         "recall": recall,

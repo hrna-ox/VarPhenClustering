@@ -249,7 +249,7 @@ class CSVLoader:
             X = pd.read_csv(
                 data_fd + "vitals_process.csv", header=0, index_col=0
             )
-            y = pd.read_csv(data_fd + f"outcomes_48_process.csv", index_col=0, header=0)
+            y = pd.read_csv(data_fd + f"outcomes_process.csv", index_col=0, header=0)
 
         else:
             raise ValueError(
@@ -331,6 +331,7 @@ class DataTransformer(CSVLoader):
                 
             # Expand data
             x, y = data
+            y.reset_index(drop=False, inplace=True)
 
             # Apply Processing steps
             x_inter = (

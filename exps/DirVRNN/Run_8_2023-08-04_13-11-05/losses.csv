@@ -1,0 +1,1 @@
+epoch,train_neg ELBO,train_Log Lik,train_KL,train_Outcome,val_neg ELBO,val_Log Lik,val_KL,val_Outcome

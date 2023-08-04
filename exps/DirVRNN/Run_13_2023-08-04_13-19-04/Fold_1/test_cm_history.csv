@@ -1,0 +1,2 @@
+mode,Tr_Death_Pr_Death,Tr_Discharge_Pr_Death,Tr_ICU_Pr_Death,Tr_Ward_Pr_Death,Tr_Death_Pr_Discharge,Tr_Discharge_Pr_Discharge,Tr_ICU_Pr_Discharge,Tr_Ward_Pr_Discharge,Tr_Death_Pr_ICU,Tr_Discharge_Pr_ICU,Tr_ICU_Pr_ICU,Tr_Ward_Pr_ICU,Tr_Death_Pr_Ward,Tr_Discharge_Pr_Ward,Tr_ICU_Pr_Ward,Tr_Ward_Pr_Ward
+test;0.0;1.0;0.0;1.0;0.0;315.0;0.0;832.0;0.0;134.0;0.0;404.0;0.0;457.0;0.0;1188.0

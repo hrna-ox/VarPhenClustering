@@ -92,30 +92,23 @@ def main():
                     gate_num_hidden_nodes=gate_num_hidden_nodes, 
                     bias=bias, 
                     dropout=dropout,  
-                    seed=seed
+                    seed=seed,
+                    K_fold_idx=fold_idx
                 )
 
         # Fit Model
         model.fit(train_data=(X_train, y_train), val_data=(X_val, y_val), 
-                lr=lr, batch_size=batch_size, num_epochs=num_epochs, 
-                save_params=save_params
+                lr=lr, batch_size=batch_size, num_epochs=num_epochs
             )
+        
+        # Log to csv
+        save_dir, _ = model.log_training_files(class_names=outcome_names)
 
         # Evaluate model
-        output_dir = model.predict(X=X_test, y=y_test, 
-                                    save_params=save_params
-                                )
+        output_dir = model.predict(X=X_test, y=y_test)
 
-
-    #
-    # "Compute results on test data"
-    # outputs_dic = model.analyse(data_info)
-    # print(outputs_dic.keys())
-
-    # -------------------------------------- Evaluate Scores --------------------------------------
-
-    # "Evaluate scores on the resulting models. Note X_test is converted back to input dimensions."
-    # scores = evaluate(**outputs_dic, data_info=data_info, avg=None)
+        # Log Predictions
+        model.log_prediction_to_files(exp_save_dir=save_dir, outcome_names=outcome_names)
 
 
     print("Analysis Complete.")
