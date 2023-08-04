@@ -476,7 +476,8 @@ class DirVRNN(nn.Module):
         self._train_loss_tracker, self._val_loss_tracker = {}, {}
         self._val_exp_obj_tracker = {}
         self._val_supervised_scores = {}
-        self._val_unsupervised_scores = {}
+        self._val_supervised_scores_lachiche_algo = {}
+        self._val_clus_quality_scores = {}
         self._val_clus_assign_scores = {}
 
 
@@ -503,14 +504,14 @@ class DirVRNN(nn.Module):
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         wandb.watch(models=self, log="all", log_freq=1, idx=K_fold_idx)           
 
-        # Initialize logger object
-        exp_save_dir = f"exps/DirVRNN"
-        log = logger(
-            save_dir=exp_save_dir, 
-            class_names=class_names, 
-            K_fold_idx=K_fold_idx, 
-            loss_names=["loss", "loss_loglik", "loss_kl", "loss_out"]
-        )
+        # # Initialize logger object
+        # exp_save_dir = f"exps/DirVRNN"
+        # log = logger(
+        #     save_dir=exp_save_dir, 
+        #     class_names=class_names, 
+        #     K_fold_idx=K_fold_idx, 
+        #     loss_names=["loss", "loss_loglik", "loss_kl", "loss_out"]
+        # )
 
         # Printing Message
         print("Printing Losses loss, Log Lik, KL, Outl")
@@ -596,53 +597,99 @@ class DirVRNN(nn.Module):
                         # ============= SCORE COMPUTATION =============
 
                         # Unpack outputs
-                        y_pred = val_history["y_pred"]
-                        clus_pred = val_history["pis"]
-                        z_est = val_history["zs"]
+                        val_hist_y_pred = val_history["y_pred"]
+                        val_hist_pis = val_history["pis"]
+                        val_hist_zs = val_history["zs"]
 
                         # Compute performance scores
-                        history_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=y_pred, run_weight_algo=False)
-                        history_sup_scores_lachiche_algo = metrics.get_multiclass_sup_scores(y_true=y, y_pred=y_pred, run_weight_algo=True)
-                        history_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=clus_pred)
-                        history_clus_qual_scores = metrics.get_unsup_scores(X=z_est, clus_pred=clus_pred, seed=self.seed)
-
-                        # Combine cluster label and cluster quality scores into single dictionary
-                        history_clus_scores = {**history_clus_label_scores, **history_clus_qual_scores}
-
+                        history_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=val_hist_y_pred, run_weight_algo=False)
+                        history_sup_scores_lachiche_algo = metrics.get_multiclass_sup_scores(y_true=y, y_pred=val_hist_y_pred, run_weight_algo=True)
+                        history_clus_assign_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=val_hist_pis)
+                        history_clus_qual_scores = metrics.get_unsup_scores(X=val_hist_zs, clus_pred=val_hist_pis, seed=self.seed)
                         
 
+
+                        # Do the same for future computations
+                        val_fut_y_pred = val_future["y_pred"]
+                        val_fut_pis = val_future["pis"]
+                        val_fut_zs = val_future["zs"]
+
+                        # Compute performance scores
+                        future_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=val_fut_y_pred, run_weight_algo=False)
+                        future_sup_scores_lachiche_algo = metrics.get_multiclass_sup_scores(y_true=y, y_pred=val_fut_y_pred, run_weight_algo=True)
+                        future_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=val_fut_pis)
+                        future_clus_qual_scores = metrics.get_unsup_scores(X=val_fut_zs, clus_pred=val_fut_pis, seed=self.seed)
+
                         # ================== LOGGING ==================
-                        self._val_loss_tracker[epoch] = (val_loss, val_loglik, val_kl, val_outl)
-                        log.log_losses(losses=[val_loss, val_kl, val_loglik, val_outl], epoch=epoch, subdir="val/losses")
-                        log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores, subdir="val/supervised_scores")
-                        log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores_lachiche_algo, subdir="val/supervised_scores_lachiche_algo")
-                        log.log_clustering_performance(iter=epoch, scores_dic=history_clus_scores, subdir="val/unsupervised_scores")
 
-            # TO DO 
-            # SAVE MODEL
-            # AT THE END OF EACH EPOCh
-            # SIMILARLY
-            # WITH ANY INTERMEDIARY PRODUCTS
+                        # Log history related components
+                        self._val_loss_tracker[epoch] = [val_loss, val_loglik, val_kl, val_outl]
+                        self._val_supervised_scores[epoch]["history"] = history_sup_scores
+                        self._val_supervised_scores_lachiche_algo[epoch]["history"] = history_sup_scores_lachiche_algo
+                        self._val_clus_quality_scores[epoch]["history"] = history_clus_qual_scores
+                        self._val_clus_assign_scores[epoch]["history"] = history_clus_assign_scores
+                        self._val_exp_obj_tracker[epoch]["history"] = {
+                            "y_pred": val_hist_y_pred,
+                            "pis": val_hist_pis,
+                            "zs": val_hist_zs,
+                        }
+
+                        # Log future related components
+                        self._val_supervised_scores[epoch]["future"] = future_sup_scores
+                        self._val_supervised_scores_lachiche_algo[epoch]["future"] = future_sup_scores_lachiche_algo
+                        self._val_clus_quality_scores[epoch]["future"] = future_clus_qual_scores
+                        self._val_clus_assign_scores[epoch]["future"] = future_clus_label_scores
+                        self._val_exp_obj_tracker[epoch]["future"] = {
+                            "y_pred": val_fut_y_pred,
+                            "pis": val_fut_pis,
+                            "zs": val_fut_zs,
+                        }
+
+
+                        # log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores, subdir="val/supervised_scores")
+                        # log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores_lachiche_algo, subdir="val/supervised_scores_lachiche_algo")
+                        # log.log_clustering_performance(iter=epoch, scores_dic=history_clus_scores, subdir="val/unsupervised_scores")
+
+        # Log Training and Validation Objects
+        self._val_exp_obj_tracker["train_data"] = train_data
+        self._val_exp_obj_tracker["val_data"] = val_data
+        self._val_exp_obj_tracker["fit_params"] = {
+            "num_epochs": num_epochs,
+            "batch_size": batch_size,
+            "lr": lr
+        }
+        self._val_exp_obj_tracker["model_params"] = self.state_dict()
 
 
 
 
 
-        # Save Training and Validation Outputs
-        save_objects = {
-            "train_data": train_data,
-            "val_data": val_data,
-            "fit_params": {
-                "num_epochs": num_epochs,
-                "batch_size": batch_size,
-                "lr": lr
-            },
-            "model_params": self.state_dict()
-        }              
-        log.log_objects(objects=save_objects, save_name="experiment_config")
+
+        # # Save Training and Validation Outputs
+        # save_objects = {
+        #     "train_data": train_data,
+        #     "val_data": val_data,
+        #     "fit_params": {
+        #         "num_epochs": num_epochs,
+        #         "batch_size": batch_size,
+        #         "lr": lr
+        #     },
+        #     "model_params": self.state_dict()
+        # }              
+        # log.log_objects(objects=save_objects, save_name="experiment_config")
 
     def predict(self, X, y, save_params: Union[None, Dict] = None):
         """Similar to forward method, but focus on inner computations and tracking objects for the model."""
+
+
+        # ================== INITIALIZATION ==================
+        self._test_loss = {}
+        self._test_exp_obj = {}
+        self._test_supervised_scores = {}
+        self._test_supervised_scores_lachiche_algo = {}
+        self._test_clus_quality_scores = {}
+        self._test_clus_assign_scores = {}
+
 
         # ================== DATA PREPARATION ==================
 
@@ -683,75 +730,76 @@ class DirVRNN(nn.Module):
                 # ============= SCORE COMPUTATION =============
 
                 # Unpack outputs
-                past_y_pred = test_history["y_pred"]
-                past_clus_pred = test_history["pis"]
-                past_z_est = test_history["zs"]
+                test_hist_y_pred = test_history["y_pred"]
+                test_hist_pis = test_history["pis"]
+                test_hist_zs = test_history["zs"]
 
                 # Compute performance scores
-                history_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=past_y_pred, run_weight_algo=False)
-                history_sup_scores_lachiche_algo = metrics.get_multiclass_sup_scores(y_true=y, y_pred=past_y_pred, run_weight_algo=True)
-                history_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=past_clus_pred)
-                history_clus_qual_scores = metrics.get_unsup_scores(X=past_z_est, clus_pred=past_clus_pred, seed=self.seed)
+                history_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=test_hist_y_pred, run_weight_algo=False)
+                history_sup_scores_lachiche_algo = metrics.get_multiclass_sup_scores(y_true=y, y_pred=test_hist_y_pred, run_weight_algo=True)
+                history_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=test_hist_pis)
+                history_clus_qual_scores = metrics.get_unsup_scores(X=test_hist_zs, clus_pred=test_hist_pis, seed=self.seed)
 
-                # Combine cluster label and cluster quality scores into single dictionary
-                history_clus_scores = {**history_clus_label_scores, **history_clus_qual_scores}
                 
                 # Do the same for future computations
-                future_y_pred = test_future["y_pred"]
-                future_clus_pred = test_future["pis"]
-                future_z_est = test_future["zs"]
+                test_fut_y_pred = test_future["y_pred"]
+                test_fut_pis = test_future["pis"]
+                test_fut_zs = test_future["zs"]
 
                 # Compute performance scores
-                future_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=future_y_pred, run_weight_algo=False)
-                future_sup_scores_lachiche_algo = metrics.get_multiclass_sup_scores(y_true=y, y_pred=future_y_pred, run_weight_algo=True)
-                future_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=future_clus_pred)
-                future_clus_qual_scores = metrics.get_unsup_scores(X=future_z_est, clus_pred=future_clus_pred, seed=self.seed)
+                future_sup_scores = metrics.get_multiclass_sup_scores(y_true=y, y_pred=test_fut_y_pred, run_weight_algo=False)
+                future_sup_scores_lachiche_algo = metrics.get_multiclass_sup_scores(y_true=y, y_pred=test_fut_y_pred, run_weight_algo=True)
+                future_clus_label_scores = metrics.get_clus_label_match_scores(y_true=y, clus_pred=test_fut_pis)
+                future_clus_qual_scores = metrics.get_unsup_scores(X=test_fut_zs, clus_pred=test_fut_pis, seed=self.seed)
 
-                # Combine cluster label and cluster quality scores into single dictionary
-                future_clus_scores = {**future_clus_label_scores, **future_clus_qual_scores}
 
                 # ================== LOGGING ==================
-                log.log_losses(losses=[test_loss, test_loglik, test_kl, test_outl], epoch="test", subdir="test/losses")
-                log.log_supervised_performance(iter="test", scores_dic=history_sup_scores, subdir="test/history/supervised_scores")
-                log.log_supervised_performance(iter="test", scores_dic=history_sup_scores_lachiche_algo, subdir="test/future/supervised_scores_lachiche_algo")
-                log.log_clustering_performance(iter="test", scores_dic=history_clus_scores, subdir="test/history/unsupervised_scores")
+                # Log losses
+                self._test_loss["test"] = [test_loss, test_loglik, test_kl, test_outl]
 
-                # Log future scores as well
-                log.log_supervised_performance(iter="test", scores_dic=future_sup_scores, subdir="test/future/supervised_scores")
-                log.log_supervised_performance(iter="test", scores_dic=future_sup_scores_lachiche_algo, subdir="test/future/supervised_scores_lachiche_algo")
-                log.log_clustering_performance(iter="test", scores_dic=future_clus_scores, subdir="test/future/unsupervised_scores")
-
-                output_dir = {
-                    "losses": {
-                        "loss": test_loss,
-                        "loss_loglik": test_loglik,
-                        "loss_kl": test_kl,
-                        "loss_out": test_outl
-                    },
-                    "history": {
-                        "y_pred": past_y_pred,
-                        "pis": past_clus_pred,
-                        "zs": past_z_est
-                    },
-                    "future": {
-                        "y_pred": future_y_pred,
-                        "pis": future_clus_pred,
-                        "zs": future_z_est
-                    }
+                # Log past objects
+                self._test_supervised_scores["test"]["history"] = history_sup_scores
+                self._test_supervised_scores_lachiche_algo["test"]["history"] = history_sup_scores_lachiche_algo
+                self._test_clus_quality_scores["test"]["history"] = history_clus_qual_scores
+                self._test_clus_assign_scores["test"]["history"] = history_clus_label_scores
+                self._test_exp_obj["test"]["history"] = {
+                    "y_pred": test_hist_y_pred,
+                    "pis": test_hist_pis,
+                    "zs": test_hist_zs
                 }
-        
-        # Log model params, model and other objects
-        save_objects = {
-            "test_data": (X, y),
-            "clus_params": {
-                "c_means": self.c_means,
-                "log_c_vars": self.log_c_vars
-            },
-            "model_params": self.state_dict(),
-            "save_params": save_params
-        }
 
-        log.log_objects(objects=save_objects, save_name="test_output")
+                # Log future objects
+                self._test_supervised_scores["test"]["future"]= future_sup_scores
+                self._test_supervised_scores_lachiche_algo["test"]["future"] = future_sup_scores_lachiche_algo
+                self._test_clus_quality_scores["test"]["future"] = future_clus_qual_scores
+                self._test_clus_assign_scores["test"]["future"] = future_clus_label_scores
+                self._test_exp_obj["test"]["future"] = {
+                    "y_pred": test_fut_y_pred,
+                    "pis": test_fut_pis,
+                    "zs": test_fut_zs
+                }
+
+
+        # Log model params, model and other objects
+        self._test_exp_obj["test"]["test_data"] = (X, y)
+        self._test_exp_obj["test"]["clus_params"] = {
+            "c_means": self.c_means,
+            "log_c_vars": self.log_c_vars
+        }
+        self._test_exp_obj["test"]["model_params"] = self.state_dict()
+        self._test_exp_obj["test"]["save_params"] = save_params
+        
+        # save_objects = {
+        #     "test_data": (X, y),
+        #     "clus_params": {
+        #         "c_means": self.c_means,
+        #         "log_c_vars": self.log_c_vars
+        #     },
+        #     "model_params": self.state_dict(),
+        #     "save_params": save_params
+        # }
+
+        # log.log_objects(objects=save_objects, save_name="test_output")
 
         return {**output_dir, **save_objects}
 # endregion
