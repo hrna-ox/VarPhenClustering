@@ -176,6 +176,7 @@ class DirVRNN(nn.Module):
         )
         self.cell_update_output_fn = nn.ReLU()
 
+
     
     "Define methods to simplify passes through network blocks"
     def _apply_encoder(self, x):
@@ -471,6 +472,14 @@ class DirVRNN(nn.Module):
             - history: dictionary with training history, including each loss component.
         """
 
+        # ================== INITIALIZATION ==================
+        self._train_loss_tracker, self._val_loss_tracker = {}, {}
+        self._val_exp_obj_tracker = {}
+        self._val_supervised_scores = {}
+        self._val_unsupervised_scores = {}
+        self._val_clus_assign_scores = {}
+
+
         # ================== DATA PREPARATION ==================
 
         # Unpack Save Parameters
@@ -525,7 +534,7 @@ class DirVRNN(nn.Module):
                 optimizer.zero_grad()
 
                 # Compute Loss for single model pass
-                batch_loss, batch_loglik, batch_kl, batch_outl, train_history, train_forward = self.forward(x, y, mode="train")
+                batch_loss, batch_loglik, batch_kl, batch_outl, train_history, train_future = self.forward(x, y, mode="train")
 
                 # Back-propagate loss and update weights
                 batch_loss.backward()
@@ -551,11 +560,10 @@ class DirVRNN(nn.Module):
                     epoch, 100, ep_loss.item(), ep_loglik.item(), ep_kl.item(), ep_outl.item()
                 ),
                 end="     ",
-            )
-
+            )            
 
             # ============== LOGGING ==============
-            log.log_losses(losses=[ep_loss, ep_kl, ep_loglik, ep_outl], epoch=epoch, subdir="train")
+            self._train_loss_tracker[epoch] = (ep_loss, ep_loglik, ep_kl, ep_outl)
 
 
             # ============= VALIDATION =============
@@ -604,6 +612,7 @@ class DirVRNN(nn.Module):
                         
 
                         # ================== LOGGING ==================
+                        self._val_loss_tracker[epoch] = (val_loss, val_loglik, val_kl, val_outl)
                         log.log_losses(losses=[val_loss, val_kl, val_loglik, val_outl], epoch=epoch, subdir="val/losses")
                         log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores, subdir="val/supervised_scores")
                         log.log_supervised_performance(iter=epoch, scores_dic=history_sup_scores_lachiche_algo, subdir="val/supervised_scores_lachiche_algo")
