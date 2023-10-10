@@ -1,0 +1,26 @@
+{
+    "data_dir":"data/MIMIC/processed",
+    "time_window": [0, 10],
+    "feat_subset":"vitals-static",
+    "train_test_ratio":0.6,
+    "train_val_ratio":0.6,
+    "seed": 1313,
+    "normalize": true,
+    "num_folds": 1,
+    "model_params": {
+        "K": 10,
+        "latent_dim": 32,
+        "gate_num_hidden_layers": 2,
+        "gate_num_hidden_nodes": 20,
+        "bias": true,
+        "dropout": 0.5,
+        "device": "cpu",
+        "seed": 1313,
+        "K_fold_idx": 1
+    },
+    "train_params": {
+        "lr": 0.005,
+        "batch_size": 256,
+        "num_epochs": 30
+    }
+}

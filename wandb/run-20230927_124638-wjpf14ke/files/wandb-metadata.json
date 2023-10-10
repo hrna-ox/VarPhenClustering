@@ -1,0 +1,49 @@
+{
+    "os": "Windows-10-10.0.22621-SP0",
+    "python": "3.9.0",
+    "heartbeatAt": "2023-09-27T11:46:40.492828",
+    "startedAt": "2023-09-27T11:46:38.852251",
+    "docker": null,
+    "cuda": null,
+    "args": null,
+    "state": "running",
+    "program": "<python with no main file>",
+    "git": {
+        "remote": "https://github.com/hrna-ox/phd-repo-template.git",
+        "commit": "6f47b82e4238fd8d40e5c558416c1006a96a56eb"
+    },
+    "email": "henrique.aguiar@eng.ox.ac.uk",
+    "root": "c:/Users/hruia/PycharmProjects/phd-repo-template",
+    "host": "DESKTOP-MUH03CH",
+    "username": "hruia",
+    "executable": "c:\\Users\\hruia\\Anaconda3\\envs\\deeplearning\\python.exe",
+    "cpu_count": 4,
+    "cpu_count_logical": 8,
+    "cpu_freq": {
+        "current": 1910.0,
+        "min": 0.0,
+        "max": 2112.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 1910.0,
+            "min": 0.0,
+            "max": 2112.0
+        }
+    ],
+    "disk": {
+        "total": 474.75292587280273,
+        "used": 388.0816421508789
+    },
+    "gpu": "GeForce GTX 1050",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "GeForce GTX 1050",
+            "memory_total": 2147483648
+        }
+    ],
+    "memory": {
+        "total": 15.918956756591797
+    }
+}

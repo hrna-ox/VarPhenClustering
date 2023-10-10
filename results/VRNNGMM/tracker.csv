@@ -1,0 +1,6 @@
+data_dir,time_window,feat_subset,train_test_ratio,train_val_ratio,seed,normalize,num_folds,train_params,F1,Precision,Recall,Auroc,SIL,DBI,VRI
+data/MIMIC/processed,"[0, 10]",vitals-static,0.6,0.6,1313,True,1,"{'lr': 0.001, 'batch_size': 64, 'num_epochs': 5}",F1,Precision,Recall,Auroc,SIL,DBI,VRI
+data/MIMIC/processed,"[0, 10]",vitals-static,0.6,0.6,1313,True,1,"{'lr': 0.001, 'batch_size': 256, 'num_epochs': 50}",F1,Precision,Recall,Auroc,SIL,DBI,VRI
+data/MIMIC/processed,"[0, 10]",vitals-static,0.6,0.6,1313,True,1,"{'lr': 0.001, 'batch_size': 256, 'num_epochs': 50}",F1,Precision,Recall,Auroc,SIL,DBI,VRI
+data/MIMIC/processed,"[0, 10]",vitals-static,0.6,0.6,2424,True,1,"{'lr': 0.001, 'batch_size': 256, 'num_epochs': 50}",F1,Precision,Recall,Auroc,SIL,DBI,VRI
+data/MIMIC/processed,"[0, 10]",vitals-static,0.6,0.6,2424,True,1,"{'lr': 0.001, 'batch_size': 256, 'num_epochs': 50}",F1,Precision,Recall,Auroc,SIL,DBI,VRI

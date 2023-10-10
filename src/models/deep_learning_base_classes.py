@@ -89,7 +89,8 @@ class MLP(nn.Module):
 
         # Iterate through layers
         for layer_i in self.nn_layers[:-1]: # type: ignore
-
+            
+            
             # Apply layer transformation
             inter_x = layer_i(_x)                # Layer defines map
             inter_x= self.act_fn(inter_x)
@@ -251,4 +252,3 @@ class LSTM_Dec_v2(nn.Module):
 
         return output
 # endregion
-

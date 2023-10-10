@@ -1,0 +1,15 @@
+{
+    "model_name": "GMM",
+    "data_dir":"data/MIMIC/processed",
+    "time_window": [0, 10],
+    "feat_subset":"vitals-static",
+    "train_test_ratio":0.6,
+    "train_val_ratio":0.6,
+    "seed":1313,
+    "normalize": true,
+    "num_folds": 1,
+    "model_params": {
+        "K": 5,
+        "random_state": 1313
+    }
+}
