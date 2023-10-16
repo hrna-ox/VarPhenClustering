@@ -11,6 +11,8 @@ import numpy as np
 
 from typing import Union
 
+eps = 1e-8
+
 def _numpy_forward_fill(array: np.ndarray) -> np.ndarray:
     """
     Forward Fill a numpy array. 
@@ -136,17 +138,17 @@ def min_max_normalize(array: np.ndarray, _min: Union[np.ndarray, None] = None, _
         array_out: Normalized array.
     """
     if _min is None:
-        _min = np.min(array, axis=0, keepdims=True)
+        _min = np.nanmin(array, axis=(0,1), keepdims=True)
 
     if _max is None:
-        _max = np.max(array, axis=0, keepdims=True)
+        _max = np.nanmax(array, axis=(0,1), keepdims=True)
     assert isinstance(_min, np.ndarray) and isinstance(_max, np.ndarray)
 
     # Compute normalized array while checking for potential divisions by 0
     array_out = np.where(
         _max == _min,
         0,
-        (array - _min) / (_max - _min)
+        (array - _min) / (_max - _min + eps)
     )
 
     return array_out, _min, _max
